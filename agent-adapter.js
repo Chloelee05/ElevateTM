@@ -179,8 +179,8 @@ async function getAIBid(gameState, playerBid = null, personality = null) {
     const updatedState = result.state || null;
     
     const aiDecision = {
-      bid: result.result?.ai_bid || Math.floor(Math.random() * 15) + 1,
-      reasons: result.result?.ai_reasons || ['AI decision from Next.js API'],
+      bid: result.result?.round?.ai_bid || result.result?.ai_bid || Math.floor(Math.random() * 15) + 1,
+      reasons: result.result?.aiReasons || result.result?.ai_reasons || ['AI decision from Next.js API'],
       action: selectRandomAction(gameState.bot?.credits || 100),
       personality: selectedPersonality,
       gameOver: gameOver,

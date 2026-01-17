@@ -1979,21 +1979,22 @@ function showFinalReportModal(data) {
             </div>
             
             <!-- Overall Archetype Title -->
-            ${parsedReport.archetype ? `
-                <div style="
-                    text-align: center;
-                    margin-bottom: 20px;
-                    padding: 15px;
-                    background: linear-gradient(135deg, #a855f722, transparent);
-                    border: 2px solid #a855f7;
-                    border-radius: 12px;
-                ">
-                    <div style="color: #a855f7; font-size: 0.5em; margin-bottom: 8px;">⭐ OVERALL ARCHETYPE</div>
-                    <div style="color: #ffd93d; font-size: 0.8em; text-shadow: 2px 2px 0px #000;">
-                        ${escapeHtml(parsedReport.archetype)}
-                    </div>
+            <div style="
+                text-align: center;
+                margin-bottom: 20px;
+                padding: 20px;
+                background: linear-gradient(135deg, #a855f722, transparent);
+                border: 2px solid #a855f7;
+                border-radius: 12px;
+                font-family: 'Press Start 2P', cursive;
+            ">
+                <div style="color: #a855f7; font-size: 0.6em; margin-bottom: 12px; font-family: 'Press Start 2P', cursive; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <span style="font-size: 1.3em;">⭐</span> OVERALL ARCHETYPE
                 </div>
-            ` : ''}
+                <div style="color: #ffd93d; font-size: 0.85em; text-shadow: 2px 2px 0px #000; font-family: 'Press Start 2P', cursive;">
+                    ${escapeHtml(parsedReport.archetype || 'Analyzing your play style...')}
+                </div>
+            </div>
             
             <!-- 6 Categories Grid -->
             <div style="
@@ -2002,42 +2003,110 @@ function showFinalReportModal(data) {
                 gap: 12px;
                 margin-bottom: 20px;
             ">
-                ${buildCategoryCard('🎯', 'Risk Posture', parsedReport.riskPosture, '#ff6b6b')}
-                ${buildCategoryCard('💰', 'Capital Efficiency', parsedReport.capitalEfficiency, '#ffd93d')}
-                ${buildCategoryCard('🧠', 'Emotional Discipline', parsedReport.emotionalDiscipline, '#22d3ee')}
-                ${buildCategoryCard('💧', 'Liquidity Management', parsedReport.liquidityManagement, '#4ade80')}
-                ${buildCategoryCard('🔄', 'Adaptability', parsedReport.adaptability, '#f97316')}
-                ${buildCategoryCard('📊', 'Game Stats', 'Rounds: ' + (data.roundHistory?.length || '?') + ' | Wins: ' + (parsedReport.wins || '?'), '#6366f1')}
+                ${(function() {
+                    // Calculate local stats if not available from parsed report
+                    const totalRounds = data.roundHistory?.length || roundAnalysisHistory.length || 1;
+                    const playerWins = roundAnalysisHistory.filter(r => r.winner === 'player' || r.winner === currentUser?.nickname).length;
+                    const winRate = Math.round((playerWins / totalRounds) * 100);
+                    const finalCredits = currentUser?.credits ?? 0;
+                    
+                    // Calculate win rate display
+                    const winsDisplay = parsedReport.wins || winRate + '% (' + playerWins + '/' + totalRounds + ')';
+                    
+                    // Emotional discipline based on bid consistency (if available)
+                    const emotionalDisplay = parsedReport.emotionalDiscipline || 'Steady';
+                    
+                    // Adaptability based on game performance
+                    const adaptDisplay = parsedReport.adaptability || (winRate >= 50 ? 'Good' : 'Learning');
+                    
+                    return buildCategoryCard('🎯', 'Risk Posture', parsedReport.riskPosture || 'Balanced', '#ff6b6b') +
+                           buildCategoryCard('💰', 'Capital Efficiency', parsedReport.capitalEfficiency || 'N/A', '#ffd93d') +
+                           buildCategoryCard('🏆', 'Win Rate', winsDisplay, '#22d3ee') +
+                           buildCategoryCard('💧', 'Liquidity', parsedReport.liquidityManagement || 'N/A', '#4ade80') +
+                           buildCategoryCard('💵', 'Final Credits', '$' + finalCredits, '#f97316') +
+                           buildCategoryCard('📊', 'Total Rounds', String(totalRounds), '#6366f1');
+                })()}
             </div>
             
             <!-- Key Takeaway -->
-            ${parsedReport.keyTakeaway ? `
-                <div style="
-                    background: linear-gradient(135deg, #4ade8022, transparent);
-                    border: 2px solid #4ade80;
-                    border-radius: 10px;
-                    padding: 15px;
-                    margin-bottom: 15px;
-                ">
-                    <div style="color: #4ade80; font-size: 0.45em; margin-bottom: 8px;">💡 KEY TAKEAWAY</div>
-                    <div style="color: #e2e8f0; font-size: 0.4em; line-height: 1.6; font-family: 'Courier New', monospace;">
-                        ${escapeHtml(parsedReport.keyTakeaway)}
-                    </div>
+            <div style="
+                background: linear-gradient(135deg, #4ade8022, transparent);
+                border: 2px solid #4ade80;
+                border-radius: 10px;
+                padding: 18px;
+                margin-bottom: 15px;
+                font-family: 'Press Start 2P', cursive;
+            ">
+                <div style="color: #4ade80; font-size: 0.55em; margin-bottom: 12px; font-family: 'Press Start 2P', cursive; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2em;">💡</span> KEY TAKEAWAY
                 </div>
-            ` : ''}
+                <div style="color: #e2e8f0; font-size: 0.5em; line-height: 1.8; font-family: 'Press Start 2P', cursive;">
+                    ${escapeHtml(parsedReport.keyTakeaway || 'Complete more rounds for detailed analysis.')}
+                </div>
+            </div>
             
             <!-- Suggestions -->
-            ${parsedReport.suggestions ? `
+            <div style="
+                background: linear-gradient(135deg, #22d3ee22, transparent);
+                border: 2px solid #22d3ee;
+                border-radius: 10px;
+                padding: 18px;
+                margin-bottom: 20px;
+                font-family: 'Press Start 2P', cursive;
+            ">
+                <div style="color: #22d3ee; font-size: 0.55em; margin-bottom: 12px; font-family: 'Press Start 2P', cursive; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2em;">📝</span> SUGGESTIONS
+                </div>
+                <div style="color: #e2e8f0; font-size: 0.5em; line-height: 1.8; font-family: 'Press Start 2P', cursive; white-space: pre-line;">
+                    ${escapeHtml(parsedReport.suggestions || '• Play more rounds to receive personalized suggestions')}
+                </div>
+            </div>
+            
+            <!-- Round-by-Round Reports -->
+            ${roundAnalysisHistory.length > 0 ? `
                 <div style="
-                    background: linear-gradient(135deg, #22d3ee22, transparent);
-                    border: 2px solid #22d3ee;
-                    border-radius: 10px;
+                    background: rgba(0, 0, 0, 0.3);
+                    border: 2px solid #6366f1;
+                    border-radius: 12px;
                     padding: 15px;
                     margin-bottom: 20px;
+                    font-family: 'Press Start 2P', cursive;
                 ">
-                    <div style="color: #22d3ee; font-size: 0.45em; margin-bottom: 8px;">📝 SUGGESTIONS</div>
-                    <div style="color: #e2e8f0; font-size: 0.38em; line-height: 1.6; font-family: 'Courier New', monospace;">
-                        ${escapeHtml(parsedReport.suggestions)}
+                    <div style="color: #6366f1; font-size: 0.6em; margin-bottom: 12px; text-align: center; font-family: 'Press Start 2P', cursive;">
+                        📊 ROUND-BY-ROUND REPORTS
+                    </div>
+                    <div style="
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 8px;
+                        justify-content: center;
+                        max-height: 100px;
+                        overflow-y: auto;
+                        padding: 5px;
+                    " id="finalRoundReportsList">
+                        ${roundAnalysisHistory.map(report => `
+                            <div class="final-round-report-box" data-round="${report.round}" style="
+                                background: linear-gradient(135deg, ${getRiskColor(report.analysis.riskLevel)}22, transparent);
+                                border: 2px solid ${getRiskColor(report.analysis.riskLevel)};
+                                border-radius: 8px;
+                                padding: 10px 15px;
+                                cursor: pointer;
+                                text-align: center;
+                                min-width: 70px;
+                                font-family: 'Press Start 2P', cursive;
+                                display: flex;
+                                flex-direction: column;
+                                align-items: center;
+                                justify-content: center;
+                                gap: 4px;
+                            ">
+                                <span style="color: ${getRiskColor(report.analysis.riskLevel)}; font-size: 1.2em;">${getRiskEmoji(report.analysis.riskLevel)}</span>
+                                <span style="color: #ffd93d; font-size: 0.7em;">R${report.round}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div style="color: #6b7280; font-size: 0.35em; text-align: center; margin-top: 8px; font-family: 'Press Start 2P', cursive;">
+                        Click any round to view details
                     </div>
                 </div>
             ` : ''}
@@ -2062,6 +2131,25 @@ function showFinalReportModal(data) {
     `;
     
     document.body.appendChild(modal);
+    
+    // Add click handlers for round report boxes
+    document.querySelectorAll('.final-round-report-box').forEach(box => {
+        box.addEventListener('mouseenter', () => {
+            box.style.transform = 'scale(1.05)';
+            box.style.boxShadow = '0 0 10px rgba(255,255,255,0.3)';
+        });
+        box.addEventListener('mouseleave', () => {
+            box.style.transform = 'scale(1)';
+            box.style.boxShadow = 'none';
+        });
+        box.addEventListener('click', () => {
+            const roundNum = parseInt(box.dataset.round);
+            const report = roundAnalysisHistory.find(r => r.round === roundNum);
+            if (report) {
+                showRoundReportPopup(report);
+            }
+        });
+    });
 }
 
 // Parse the final report text into structured sections
@@ -2083,44 +2171,91 @@ function parseFinalReport(reportText) {
     const lines = reportText.split('\n');
     let currentSection = '';
     let suggestionsLines = [];
+    let takeawayLines = [];
     
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         const trimmed = line.trim();
         const lowerLine = trimmed.toLowerCase();
+        
+        // Skip separator lines
+        if (trimmed.match(/^[═─]+$/) || trimmed === '') {
+            continue;
+        }
+        
+        // Extract Risk Posture
+        if (lowerLine.includes('risk posture')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.riskPosture = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Capital Efficiency
+        if (lowerLine.includes('capital efficiency')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.capitalEfficiency = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Emotional Discipline
+        if (lowerLine.includes('emotional discipline')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.emotionalDiscipline = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Liquidity Management
+        if (lowerLine.includes('liquidity management')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.liquidityManagement = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Adaptability
+        if (lowerLine.includes('adaptability')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.adaptability = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Win Rate
+        if (lowerLine.includes('win rate')) {
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex !== -1) {
+                result.wins = trimmed.substring(colonIndex + 1).trim();
+            }
+            continue;
+        }
+        
+        // Extract Your Wins from Game Statistics
+        if (lowerLine.includes('your wins')) {
+            const match = trimmed.match(/your wins[:\s]*(\d+)/i);
+            if (match) {
+                result.wins = match[1];
+            }
+            continue;
+        }
         
         // Extract Overall Archetype
         if (lowerLine.includes('overall archetype')) {
             currentSection = 'archetype';
             continue;
         }
-        if (currentSection === 'archetype' && trimmed && !trimmed.includes(':')) {
-            result.archetype = trimmed;
+        if (currentSection === 'archetype' && trimmed) {
+            // Remove stars and extra characters
+            result.archetype = trimmed.replace(/[★☆]/g, '').trim();
             currentSection = '';
-        }
-        
-        // Extract Risk Posture
-        if (lowerLine.includes('risk posture:')) {
-            result.riskPosture = trimmed.split(':').slice(1).join(':').trim();
-        }
-        
-        // Extract Capital Efficiency
-        if (lowerLine.includes('capital efficiency:')) {
-            result.capitalEfficiency = trimmed.split(':').slice(1).join(':').trim();
-        }
-        
-        // Extract Emotional Discipline
-        if (lowerLine.includes('emotional discipline:')) {
-            result.emotionalDiscipline = trimmed.split(':').slice(1).join(':').trim();
-        }
-        
-        // Extract Liquidity Management
-        if (lowerLine.includes('liquidity management:')) {
-            result.liquidityManagement = trimmed.split(':').slice(1).join(':').trim();
-        }
-        
-        // Extract Adaptability
-        if (lowerLine.includes('adaptability:')) {
-            result.adaptability = trimmed.split(':').slice(1).join(':').trim();
+            continue;
         }
         
         // Extract Key Takeaway
@@ -2128,51 +2263,61 @@ function parseFinalReport(reportText) {
             currentSection = 'takeaway';
             continue;
         }
-        if (currentSection === 'takeaway' && trimmed) {
-            result.keyTakeaway = trimmed;
-            currentSection = '';
+        if (currentSection === 'takeaway') {
+            if (trimmed && !lowerLine.includes('player suggestion') && !lowerLine.includes('suggestions') && !trimmed.match(/^[═─]+$/)) {
+                takeawayLines.push(trimmed);
+            } else if (lowerLine.includes('player suggestion') || lowerLine.includes('suggestions')) {
+                currentSection = 'suggestions';
+            }
+            continue;
         }
         
         // Extract Suggestions
-        if (lowerLine.includes('player suggestions') || lowerLine.includes('suggestions:')) {
+        if (lowerLine.includes('player suggestion') || lowerLine.includes('suggestions')) {
             currentSection = 'suggestions';
             continue;
         }
-        if (currentSection === 'suggestions' && trimmed.startsWith('-')) {
+        if (currentSection === 'suggestions' && (trimmed.startsWith('-') || trimmed.startsWith('•'))) {
             suggestionsLines.push(trimmed);
         }
     }
     
+    result.keyTakeaway = takeawayLines.join(' ').trim();
     result.suggestions = suggestionsLines.join('\n');
     
     return result;
 }
 
-// Build a category card for the grid
+// Build a category card for the grid (matching round report style)
 function buildCategoryCard(emoji, title, value, color) {
     return `
         <div style="
-            background: linear-gradient(135deg, ${color}22, transparent);
+            background: ${color}22;
             border: 2px solid ${color};
             border-radius: 10px;
-            padding: 12px;
+            padding: 15px;
+            font-family: 'Press Start 2P', cursive;
+            text-align: center;
         ">
             <div style="
                 display: flex;
                 align-items: center;
+                justify-content: center;
                 gap: 8px;
-                margin-bottom: 8px;
+                margin-bottom: 12px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid ${color}44;
             ">
-                <span style="font-size: 1.1em;">${emoji}</span>
-                <span style="color: ${color}; font-size: 0.4em; text-transform: uppercase;">${title}</span>
+                <span style="font-size: 1.4em;">${emoji}</span>
+                <span style="color: ${color}; font-size: 0.9em; text-transform: uppercase; font-family: 'Press Start 2P', cursive;">${title}</span>
             </div>
             <div style="
                 color: #fff;
-                font-size: 0.45em;
-                font-family: 'Courier New', monospace;
-                line-height: 1.4;
+                font-size: 0.8em;
+                font-family: 'Press Start 2P', cursive;
+                line-height: 1.6;
             ">
-                ${escapeHtml(value || 'N/A')}
+                ${escapeHtml(value || 'Analyzing...')}
             </div>
         </div>
     `;
