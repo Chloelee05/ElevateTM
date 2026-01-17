@@ -27,7 +27,7 @@
             </div>
         </header>
 
-        <div id="tutorialOverlay" class="tutorial-overlay">
+        <div id="tutorialOverlay" class="tutorial-overlay hidden">
             <div class="tutorial-content">
                 <h2>HOW TO PLAY</h2>
                 <p>Welcome to Elevate™ - Collect passengers to win!</p>
@@ -44,16 +44,16 @@
                 <p style="margin-top: 15px; text-align: center;">
                     <a href="details.html" style="color: #4ecdc4; text-decoration: underline; font-size: 0.8em;">Need more details?-></a>
                 </p>
-                <button id="closeTutorial">CLOSE</button>
+                <button id="closeTutorial" onclick="closeTutorialHandler()">CLOSE</button>
             </div>
         </div>
 
-        <div id="joinScreen" class="screen hidden">
+        <div id="joinScreen" class="screen">
             <div class="join-form">
                 <h2>JOIN THE GAME</h2>
                 <input type="text" id="nicknameInput" placeholder="ENTER NICKNAME" maxlength="20">
-                <button id="joinButton">JOIN GAME</button>
-                <button id="showTutorialButton" style="margin-top: 15px; background: #4ecdc4; font-size: 0.7em;">HOW TO PLAY</button>
+                <button id="joinButton" onclick="joinGame()">JOIN GAME</button>
+                <button id="showTutorialButton" onclick="showTutorial()" style="margin-top: 15px; background: #4ecdc4; font-size: 0.7em;">HOW TO PLAY</button>
             </div>
         </div>
 

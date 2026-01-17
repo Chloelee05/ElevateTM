@@ -5,6 +5,15 @@ let floors = 5; // Changed from 10 to 5
 let selectedBid = null;
 let selectedAction = null;
 
+// Tutorial show handler (global function for onclick)
+window.showTutorial = function() {
+    const tutorialOverlay = document.getElementById('tutorialOverlay');
+    if (tutorialOverlay) {
+        tutorialOverlay.classList.remove('hidden');
+        tutorialOverlay.style.display = 'flex';
+    }
+};
+
 // Tutorial close handler
 window.closeTutorialHandler = function() {
     const tutorialOverlay = document.getElementById('tutorialOverlay');
@@ -23,6 +32,20 @@ window.closeTutorialHandler = function() {
     localStorage.setItem('tutorialShown', 'true');
 };
 
+// Join game handler (global function for onclick)
+window.joinGame = function() {
+    const nickname = document.getElementById('nicknameInput').value.trim();
+    if (!nickname) {
+        showNotification('Please enter a nickname', 'error');
+        return;
+    }
+    
+    socket.emit('joinGame', { nickname });
+    localStorage.setItem('tutorialShown', 'true');
+    const tutorialOverlay = document.getElementById('tutorialOverlay');
+    if (tutorialOverlay) tutorialOverlay.classList.add('hidden');
+};
+
 // All available actions - Passenger collection game
 const ALL_ACTIONS = [
     { id: 'passengerBonus', name: '🎁 Passenger Bonus', cost: 2, effect: 'If you win, get +1 extra passenger' },
@@ -39,9 +62,13 @@ const ALL_ACTIONS = [
 
 // Initialize UI
 function initUI() {
-    document.getElementById('joinButton').addEventListener('click', joinGame);
-    document.getElementById('restartButton').addEventListener('click', () => location.reload());
-    document.getElementById('startRoundButton').addEventListener('click', startRound);
+    const joinButton = document.getElementById('joinButton');
+    const restartButton = document.getElementById('restartButton');
+    const startRoundButton = document.getElementById('startRoundButton');
+    
+    if (joinButton) joinButton.addEventListener('click', joinGame);
+    if (restartButton) restartButton.addEventListener('click', () => location.reload());
+    if (startRoundButton) startRoundButton.addEventListener('click', startRound);
     
     const skipActionButton = document.getElementById('skipActionButton');
     if (skipActionButton) {
@@ -67,9 +94,12 @@ function initUI() {
         }
     }, 100);
     
-    document.getElementById('nicknameInput').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') joinGame();
-    });
+    const nicknameInput = document.getElementById('nicknameInput');
+    if (nicknameInput) {
+        nicknameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinGame();
+        });
+    }
     
     const bidInput = document.getElementById('bidInput');
     if (bidInput) {
@@ -1889,94 +1919,263 @@ function showFinalReportModal(data) {
         align-items: center;
         z-index: 10000;
         font-family: 'Press Start 2P', cursive;
+        padding: 20px;
+        box-sizing: border-box;
     `;
     
-    const isWinner = data.winner === currentUser?.nickname || data.playerPassengers > data.botPassengers;
+    const isWinner = data.winner === currentUser?.nickname;
+    
+    // Parse the final report to extract sections
+    const parsedReport = parseFinalReport(data.finalReport || '');
     
     modal.innerHTML = `
         <div style="
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border: 5px solid ${isWinner ? '#4ade80' : '#ff6b6b'};
-            border-radius: 20px;
-            padding: 30px;
-            max-width: 800px;
+            border: 4px solid ${isWinner ? '#4ade80' : '#ff6b6b'};
+            border-radius: 16px;
+            max-width: 750px;
+            width: 100%;
             max-height: 90vh;
             overflow-y: auto;
             color: white;
-            text-align: center;
+            padding: 25px;
         ">
-            <h1 style="
-                color: ${isWinner ? '#4ade80' : '#ff6b6b'};
-                font-size: 1.5em;
-                margin-bottom: 20px;
-                text-shadow: 3px 3px 0px #000;
-            ">
-                ${isWinner ? '🏆 VICTORY! 🏆' : '😢 DEFEAT'}
-            </h1>
-            
-            <div style="
-                color: #ffd93d;
-                font-size: 0.8em;
-                margin-bottom: 20px;
-            ">
-                ${data.reason}
+            <!-- Victory/Defeat Header -->
+            <div style="text-align: center; margin-bottom: 15px;">
+                <h1 style="
+                    color: ${isWinner ? '#4ade80' : '#ff6b6b'};
+                    font-size: 1.3em;
+                    margin-bottom: 8px;
+                    text-shadow: 3px 3px 0px #000;
+                ">
+                    ${isWinner ? '🏆 VICTORY! 🏆' : '😢 DEFEAT'}
+                </h1>
+                <div style="color: #ffd93d; font-size: 0.55em;">
+                    ${data.reason}
+                </div>
             </div>
             
+            <!-- Score Display -->
             <div style="
                 display: flex;
                 justify-content: center;
-                gap: 40px;
-                margin-bottom: 30px;
+                gap: 30px;
+                margin-bottom: 20px;
+                padding: 12px;
+                background: rgba(0,0,0,0.3);
+                border-radius: 10px;
             ">
                 <div style="text-align: center;">
-                    <div style="font-size: 40px;">🧑</div>
-                    <div style="color: #4ade80; font-size: 0.7em;">YOU</div>
-                    <div style="font-size: 1.2em; margin-top: 5px;">🚶 ${data.playerPassengers || 0}</div>
+                    <div style="font-size: 28px;">🧑</div>
+                    <div style="color: #4ade80; font-size: 0.5em;">YOU</div>
+                    <div style="font-size: 0.9em; margin-top: 3px;">🚶 ${data.playerPassengers || 0}</div>
                 </div>
-                <div style="font-size: 1.5em; color: #ffd93d; align-self: center;">VS</div>
+                <div style="font-size: 1em; color: #ffd93d; align-self: center;">VS</div>
                 <div style="text-align: center;">
-                    <div style="font-size: 40px;">🤖</div>
-                    <div style="color: #ff6b6b; font-size: 0.7em;">AI BOT</div>
-                    <div style="font-size: 1.2em; margin-top: 5px;">🚶 ${data.botPassengers || 0}</div>
+                    <div style="font-size: 28px;">🤖</div>
+                    <div style="color: #ff6b6b; font-size: 0.5em;">AI BOT</div>
+                    <div style="font-size: 0.9em; margin-top: 3px;">🚶 ${data.botPassengers || 0}</div>
                 </div>
             </div>
             
-            ${data.finalReport ? `
+            <!-- Overall Archetype Title -->
+            ${parsedReport.archetype ? `
                 <div style="
-                    background: rgba(0, 0, 0, 0.5);
-                    border: 2px solid #ffd93d;
-                    border-radius: 10px;
-                    padding: 20px;
+                    text-align: center;
                     margin-bottom: 20px;
-                    text-align: left;
-                    font-size: 0.5em;
-                    line-height: 1.8;
-                    white-space: pre-wrap;
-                    font-family: monospace;
-                    max-height: 300px;
-                    overflow-y: auto;
+                    padding: 15px;
+                    background: linear-gradient(135deg, #a855f722, transparent);
+                    border: 2px solid #a855f7;
+                    border-radius: 12px;
                 ">
-                    ${escapeHtml(data.finalReport)}
+                    <div style="color: #a855f7; font-size: 0.5em; margin-bottom: 8px;">⭐ OVERALL ARCHETYPE</div>
+                    <div style="color: #ffd93d; font-size: 0.8em; text-shadow: 2px 2px 0px #000;">
+                        ${escapeHtml(parsedReport.archetype)}
+                    </div>
                 </div>
             ` : ''}
             
-            <button onclick="location.reload()" style="
-                background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
-                color: white;
-                border: 3px solid #000;
-                padding: 15px 30px;
-                font-family: 'Press Start 2P', cursive;
-                font-size: 0.8em;
-                cursor: pointer;
-                border-radius: 5px;
-                box-shadow: 4px 4px 0px #000;
+            <!-- 6 Categories Grid -->
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+                margin-bottom: 20px;
             ">
-                PLAY AGAIN
-            </button>
+                ${buildCategoryCard('🎯', 'Risk Posture', parsedReport.riskPosture, '#ff6b6b')}
+                ${buildCategoryCard('💰', 'Capital Efficiency', parsedReport.capitalEfficiency, '#ffd93d')}
+                ${buildCategoryCard('🧠', 'Emotional Discipline', parsedReport.emotionalDiscipline, '#22d3ee')}
+                ${buildCategoryCard('💧', 'Liquidity Management', parsedReport.liquidityManagement, '#4ade80')}
+                ${buildCategoryCard('🔄', 'Adaptability', parsedReport.adaptability, '#f97316')}
+                ${buildCategoryCard('📊', 'Game Stats', 'Rounds: ' + (data.roundHistory?.length || '?') + ' | Wins: ' + (parsedReport.wins || '?'), '#6366f1')}
+            </div>
+            
+            <!-- Key Takeaway -->
+            ${parsedReport.keyTakeaway ? `
+                <div style="
+                    background: linear-gradient(135deg, #4ade8022, transparent);
+                    border: 2px solid #4ade80;
+                    border-radius: 10px;
+                    padding: 15px;
+                    margin-bottom: 15px;
+                ">
+                    <div style="color: #4ade80; font-size: 0.45em; margin-bottom: 8px;">💡 KEY TAKEAWAY</div>
+                    <div style="color: #e2e8f0; font-size: 0.4em; line-height: 1.6; font-family: 'Courier New', monospace;">
+                        ${escapeHtml(parsedReport.keyTakeaway)}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Suggestions -->
+            ${parsedReport.suggestions ? `
+                <div style="
+                    background: linear-gradient(135deg, #22d3ee22, transparent);
+                    border: 2px solid #22d3ee;
+                    border-radius: 10px;
+                    padding: 15px;
+                    margin-bottom: 20px;
+                ">
+                    <div style="color: #22d3ee; font-size: 0.45em; margin-bottom: 8px;">📝 SUGGESTIONS</div>
+                    <div style="color: #e2e8f0; font-size: 0.38em; line-height: 1.6; font-family: 'Courier New', monospace;">
+                        ${escapeHtml(parsedReport.suggestions)}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Play Again Button -->
+            <div style="text-align: center;">
+                <button onclick="location.reload()" style="
+                    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+                    color: white;
+                    border: 3px solid #000;
+                    padding: 12px 25px;
+                    font-family: 'Press Start 2P', cursive;
+                    font-size: 0.6em;
+                    cursor: pointer;
+                    border-radius: 5px;
+                    box-shadow: 3px 3px 0px #000;
+                ">
+                    PLAY AGAIN
+                </button>
+            </div>
         </div>
     `;
     
     document.body.appendChild(modal);
+}
+
+// Parse the final report text into structured sections
+function parseFinalReport(reportText) {
+    const result = {
+        archetype: '',
+        riskPosture: '',
+        capitalEfficiency: '',
+        emotionalDiscipline: '',
+        liquidityManagement: '',
+        adaptability: '',
+        keyTakeaway: '',
+        suggestions: '',
+        wins: ''
+    };
+    
+    if (!reportText) return result;
+    
+    const lines = reportText.split('\n');
+    let currentSection = '';
+    let suggestionsLines = [];
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const lowerLine = trimmed.toLowerCase();
+        
+        // Extract Overall Archetype
+        if (lowerLine.includes('overall archetype')) {
+            currentSection = 'archetype';
+            continue;
+        }
+        if (currentSection === 'archetype' && trimmed && !trimmed.includes(':')) {
+            result.archetype = trimmed;
+            currentSection = '';
+        }
+        
+        // Extract Risk Posture
+        if (lowerLine.includes('risk posture:')) {
+            result.riskPosture = trimmed.split(':').slice(1).join(':').trim();
+        }
+        
+        // Extract Capital Efficiency
+        if (lowerLine.includes('capital efficiency:')) {
+            result.capitalEfficiency = trimmed.split(':').slice(1).join(':').trim();
+        }
+        
+        // Extract Emotional Discipline
+        if (lowerLine.includes('emotional discipline:')) {
+            result.emotionalDiscipline = trimmed.split(':').slice(1).join(':').trim();
+        }
+        
+        // Extract Liquidity Management
+        if (lowerLine.includes('liquidity management:')) {
+            result.liquidityManagement = trimmed.split(':').slice(1).join(':').trim();
+        }
+        
+        // Extract Adaptability
+        if (lowerLine.includes('adaptability:')) {
+            result.adaptability = trimmed.split(':').slice(1).join(':').trim();
+        }
+        
+        // Extract Key Takeaway
+        if (lowerLine.includes('key takeaway')) {
+            currentSection = 'takeaway';
+            continue;
+        }
+        if (currentSection === 'takeaway' && trimmed) {
+            result.keyTakeaway = trimmed;
+            currentSection = '';
+        }
+        
+        // Extract Suggestions
+        if (lowerLine.includes('player suggestions') || lowerLine.includes('suggestions:')) {
+            currentSection = 'suggestions';
+            continue;
+        }
+        if (currentSection === 'suggestions' && trimmed.startsWith('-')) {
+            suggestionsLines.push(trimmed);
+        }
+    }
+    
+    result.suggestions = suggestionsLines.join('\n');
+    
+    return result;
+}
+
+// Build a category card for the grid
+function buildCategoryCard(emoji, title, value, color) {
+    return `
+        <div style="
+            background: linear-gradient(135deg, ${color}22, transparent);
+            border: 2px solid ${color};
+            border-radius: 10px;
+            padding: 12px;
+        ">
+            <div style="
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 8px;
+            ">
+                <span style="font-size: 1.1em;">${emoji}</span>
+                <span style="color: ${color}; font-size: 0.4em; text-transform: uppercase;">${title}</span>
+            </div>
+            <div style="
+                color: #fff;
+                font-size: 0.45em;
+                font-family: 'Courier New', monospace;
+                line-height: 1.4;
+            ">
+                ${escapeHtml(value || 'N/A')}
+            </div>
+        </div>
+    `;
 }
 
 // Helper to escape HTML
