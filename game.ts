@@ -419,6 +419,7 @@ export type RoundOutcome = {
     message?: string;
     round?: RoundRecord;
     aiReasons?: string[];
+    desc?: string[];
 };
 
 export async function play_round(state: GameState, player_bid: number, graph: GraphLike = getGraph()): Promise<RoundOutcome> {
@@ -494,23 +495,23 @@ export async function play_round(state: GameState, player_bid: number, graph: Gr
     if (state.player.money == 0 && state.ai.money == 0) {
         console.log("\nBoth players hit $0. Game ends");
         state.current_round += 1;
-        return { status: "ended", message: "Both players hit $0.", round: rec, aiReasons: desc };
+        return { status: "ended", message: "Both players hit $0.", round: rec, aiReasons: desc, desc };
     }
     else if (state.player.money == 0) {
         console.log("\nPLAYER hit $0. Game ends");
         walkover("PLAYER", state, true);
         state.current_round += 1;
-        return { status: "ended", message: "PLAYER hit $0.", round: rec, aiReasons: desc };
+        return { status: "ended", message: "PLAYER hit $0.", round: rec, aiReasons: desc, desc };
     }
     else if (state.ai.money == 0) {
         console.log("\nAI hit $0. Game ends");
         walkover("AI", state, true);
         state.current_round += 1;
-        return { status: "ended", message: "AI hit $0.", round: rec, aiReasons: desc };
+        return { status: "ended", message: "AI hit $0.", round: rec, aiReasons: desc, desc };
     }
 
     state.current_round += 1;
-    return { status: "ok", round: rec, aiReasons: desc };
+    return { status: "ok", round: rec, aiReasons: desc, desc };
 }
 
 // Console-driven CLI removed; drive the game via frontend/API using play_round and report helpers.
