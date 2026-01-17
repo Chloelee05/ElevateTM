@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-
 import {
   create_initial_state,
   hydrate_state,
@@ -10,7 +9,7 @@ import {
 
 // Simple API bridge to drive the game from the frontend.
 // POST /api/game with { action: "start" } -> returns fresh state
-// POST /api/game with { action: "play", bid, state } -> plays one round, returns updated state + round result
+// POST /api/game with { action: "play", bid, state } -> plays one round, returns updated state + round result (includes desc/aiReasons)
 // POST /api/game with { action: "report", state } -> returns final report for the provided state
 
 export async function POST(req: NextRequest) {
@@ -59,4 +58,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 });
 }
-
