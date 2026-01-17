@@ -25,16 +25,16 @@ window.closeTutorialHandler = function() {
 
 // All available actions
 const ALL_ACTIONS = [
-    { id: 'goldenSummon', name: '👑 Golden Summon', cost: 3, effect: 'Summon elevator to your floor' },
-    { id: 'bribeAI', name: '💰 Bribe the AI', cost: 2, effect: 'Increase bid priority' },
-    { id: 'capitalistBlitz', name: '⚡ Capitalist Blitz', cost: 3, effect: 'All actions 50% off for 60s' },
-    { id: 'emergencyCall', name: '🚨 Emergency Call', cost: 2, effect: 'Force nearest elevator to your floor' },
-    { id: 'priorityBoost', name: '🚀 Priority Boost', cost: 1, effect: 'Double your bid effectiveness' },
-    { id: 'forceCloseDoor', name: '🚪 Force Close Door', cost: 1, effect: 'Cancel all other bids' },
-    { id: 'royalAscent', name: '⭐ Royal Ascent', cost: 2, effect: 'Non-stop express ride' },
-    { id: 'floor1Priority', name: '🎯 Floor 1 Priority', cost: 2, effect: 'Guaranteed stop at Floor 1' },
-    { id: 'skipFloors', name: '⚡ Skip Floors', cost: 3, effect: 'Skip all floors, go directly to Floor 1' },
-    { id: 'disableAction', name: '🚫 Disable Action', cost: 2, effect: 'Disable target player actions for 6s' }
+    { id: 'deferredSummon', name: '⏰ Deferred Summon', cost: 2, effect: 'Schedules elevator to your floor at START of next round' },
+    { id: 'liquidityLock', name: '🔒 Liquidity Lock', cost: 2, effect: 'Target player\'s NEXT action costs +$1' },
+    { id: 'marketSpoof', name: '🎭 Market Spoof', cost: 2, effect: 'Generates fake high-value bid that influences AI decisions' },
+    { id: 'shortTheFloor', name: '📉 Short the Floor', cost: 3, effect: 'All bids targeting chosen floor have -50% effectiveness this round' },
+    { id: 'earlyCommit', name: '⚡ Early Commit', cost: 1, effect: 'Your action resolves FIRST this round and cannot be cancelled' },
+    { id: 'lateHijack', name: '🕰 Late Hijack', cost: 2, effect: 'At end of round, cancel ONE target player\'s action' },
+    { id: 'insuranceProtocol', name: '🛡 Insurance Protocol', cost: 2, effect: 'If your next elevator action fails, refund cost and allow one retry' },
+    { id: 'auditShield', name: '🛡 Audit Shield', cost: 1, effect: 'Negates the FIRST hostile action targeting you this round' },
+    { id: 'hostileTakeover', name: '👑 Hostile Takeover', cost: 4, effect: 'You temporarily override elevator AI decision logic for this round' },
+    { id: 'collapseTrigger', name: '💥 Collapse Trigger', cost: 3, effect: 'Increases system stress level by +25%' }
 ];
 
 // Initialize UI
@@ -798,6 +798,244 @@ socket.on('roundProcessing', (data) => {
     showNotification(`Round ${data.round} processing...`);
     updateUI();
 });
+
+socket.on('roundAnalysis', (data) => {
+    const analysis = data.analysis;
+    
+    // Show analysis modal/overlay
+    showRoundAnalysis(analysis);
+    
+    // Update gameState
+    if (data.gameState) {
+        gameState = data.gameState;
+        if (currentUser && gameState.player) {
+            currentUser.credits = gameState.player.credits;
+            currentUser.floor = gameState.player.floor;
+            currentUser.inElevator = gameState.player.inElevator;
+            currentUser.elevatorId = gameState.player.elevatorId;
+        }
+    }
+    
+    updateUI();
+});
+
+function showRoundAnalysis(analysis) {
+    // Remove existing analysis overlay
+    const existingOverlay = document.getElementById('analysisOverlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+    
+    // Clear any existing timer
+    if (window.analysisTimerInterval) {
+        clearInterval(window.analysisTimerInterval);
+    }
+    if (window.analysisTimeout) {
+        clearTimeout(window.analysisTimeout);
+    }
+    
+    // Create analysis overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'analysisOverlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 5px solid #ffd93d;
+        padding: 30px;
+        z-index: 10000;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 0 30px rgba(255, 217, 61, 0.5), 8px 8px 0px #000;
+        font-family: 'Press Start 2P', cursive;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    let bidSection = '';
+    if (analysis.bidWinner === 'player') {
+        bidSection = `
+            <div style="background: #4ade80; color: #000; padding: 15px; margin-bottom: 15px; border: 3px solid #000;">
+                <div style="font-size: 0.8em; margin-bottom: 8px;">🎯 ELEVATOR DECISION</div>
+                <div style="font-size: 0.7em;">Goes to Floor ${analysis.elevatorDestination?.floor || '?'} (YOUR floor)</div>
+                <div style="font-size: 0.6em; margin-top: 5px; color: #166534;">${analysis.elevatorDestination?.reason || ''}</div>
+            </div>
+        `;
+    } else if (analysis.bidWinner === 'bot') {
+        bidSection = `
+            <div style="background: #ff6b6b; color: #fff; padding: 15px; margin-bottom: 15px; border: 3px solid #000;">
+                <div style="font-size: 0.8em; margin-bottom: 8px;">🎯 ELEVATOR DECISION</div>
+                <div style="font-size: 0.7em;">Goes to Floor ${analysis.elevatorDestination?.floor || '?'} (AI Bot's floor)</div>
+                <div style="font-size: 0.6em; margin-top: 5px; color: #fef2f2;">${analysis.elevatorDestination?.reason || ''}</div>
+            </div>
+        `;
+    } else {
+        bidSection = `
+            <div style="background: #6b7280; color: #fff; padding: 15px; margin-bottom: 15px; border: 3px solid #000;">
+                <div style="font-size: 0.8em; margin-bottom: 8px;">🎯 ELEVATOR DECISION</div>
+                <div style="font-size: 0.7em;">No valid bids this round</div>
+            </div>
+        `;
+    }
+    
+    let bidsSection = '<div style="display: flex; gap: 15px; margin-bottom: 15px;">';
+    
+    // Player bid
+    bidsSection += `
+        <div style="flex: 1; background: #0f3460; padding: 12px; border: 2px solid #4ecdc4;">
+            <div style="font-size: 0.6em; color: #4ecdc4; margin-bottom: 5px;">YOUR BID</div>
+            <div style="font-size: 1em; color: #ffd93d;">$${analysis.playerBid?.amount || 0}</div>
+        </div>
+    `;
+    
+    // Bot bid
+    bidsSection += `
+        <div style="flex: 1; background: #0f3460; padding: 12px; border: 2px solid #ff6b6b;">
+            <div style="font-size: 0.6em; color: #ff6b6b; margin-bottom: 5px;">AI BOT BID</div>
+            <div style="font-size: 1em; color: #ffd93d;">$${analysis.botBid?.amount || 0}</div>
+        </div>
+    `;
+    bidsSection += '</div>';
+    
+    let actionsSection = '';
+    if (analysis.playerAction || analysis.botAction) {
+        actionsSection = '<div style="margin-bottom: 15px;">';
+        actionsSection += '<div style="font-size: 0.7em; color: #ffd93d; margin-bottom: 10px;">⚡ ACTIONS</div>';
+        
+        if (analysis.playerAction) {
+            actionsSection += `
+                <div style="background: #0f3460; padding: 10px; border-left: 4px solid #4ecdc4; margin-bottom: 8px;">
+                    <span style="font-size: 0.6em; color: #4ecdc4;">YOU:</span>
+                    <span style="font-size: 0.6em; color: #fff;"> ${analysis.playerAction.name} ($${analysis.playerAction.cost})</span>
+                </div>
+            `;
+        }
+        
+        if (analysis.botAction) {
+            actionsSection += `
+                <div style="background: #0f3460; padding: 10px; border-left: 4px solid #ff6b6b; margin-bottom: 8px;">
+                    <span style="font-size: 0.6em; color: #ff6b6b;">AI BOT:</span>
+                    <span style="font-size: 0.6em; color: #fff;"> ${analysis.botAction.name} ($${analysis.botAction.cost})</span>
+                </div>
+            `;
+        }
+        
+        actionsSection += '</div>';
+    }
+    
+    overlay.innerHTML = `
+        <h3 style="color: #ffd93d; font-size: 1em; margin-bottom: 20px; text-align: center;">📊 ROUND ANALYSIS</h3>
+        ${bidsSection}
+        ${bidSection}
+        ${actionsSection}
+        <div style="text-align: center; margin-top: 20px;">
+            <div style="font-size: 0.6em; color: #9ca3af; margin-bottom: 10px;">
+                ⏱️ Time remaining: <span id="analysisTimer" style="color: #ffd93d;">1:30</span>
+            </div>
+            <div style="width: 100%; height: 6px; background: #0f3460; border-radius: 3px; margin-bottom: 15px;">
+                <div id="analysisProgressBar" style="width: 100%; height: 100%; background: #4ecdc4; border-radius: 3px; transition: width 1s linear;"></div>
+            </div>
+            <button id="closeAnalysisBtn" style="
+                padding: 15px 30px;
+                background: #4ecdc4;
+                color: #000;
+                border: 4px solid #000;
+                cursor: pointer;
+                font-family: 'Press Start 2P', cursive;
+                font-size: 0.8em;
+                box-shadow: 4px 4px 0px #000;
+                transition: all 0.1s;
+            ">CONTINUE ▶</button>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Close button handler
+    const closeBtn = document.getElementById('closeAnalysisBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeRoundAnalysis);
+        closeBtn.addEventListener('mouseenter', () => {
+            closeBtn.style.transform = 'translate(2px, 2px)';
+            closeBtn.style.boxShadow = '2px 2px 0px #000';
+        });
+        closeBtn.addEventListener('mouseleave', () => {
+            closeBtn.style.transform = 'translate(0, 0)';
+            closeBtn.style.boxShadow = '4px 4px 0px #000';
+        });
+    }
+    
+    // Timer: 90 seconds (1 min 30 sec)
+    const maxTime = 90;
+    let remainingTime = maxTime;
+    
+    // Update timer every second
+    window.analysisTimerInterval = setInterval(() => {
+        remainingTime--;
+        
+        const minutes = Math.floor(remainingTime / 60);
+        const seconds = remainingTime % 60;
+        const timerDisplay = document.getElementById('analysisTimer');
+        const progressBar = document.getElementById('analysisProgressBar');
+        
+        if (timerDisplay) {
+            timerDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            // Change color when time is running low
+            if (remainingTime <= 30) {
+                timerDisplay.style.color = '#ff6b6b';
+            }
+            if (remainingTime <= 10) {
+                timerDisplay.style.animation = 'blink 0.5s infinite';
+            }
+        }
+        
+        if (progressBar) {
+            const percentage = (remainingTime / maxTime) * 100;
+            progressBar.style.width = `${percentage}%`;
+            
+            // Change color when time is running low
+            if (remainingTime <= 30) {
+                progressBar.style.background = '#ffd93d';
+            }
+            if (remainingTime <= 10) {
+                progressBar.style.background = '#ff6b6b';
+            }
+        }
+        
+        if (remainingTime <= 0) {
+            closeRoundAnalysis();
+        }
+    }, 1000);
+    
+    // Auto-close after 90 seconds
+    window.analysisTimeout = setTimeout(() => {
+        closeRoundAnalysis();
+    }, maxTime * 1000);
+}
+
+function closeRoundAnalysis() {
+    // Clear timers
+    if (window.analysisTimerInterval) {
+        clearInterval(window.analysisTimerInterval);
+        window.analysisTimerInterval = null;
+    }
+    if (window.analysisTimeout) {
+        clearTimeout(window.analysisTimeout);
+        window.analysisTimeout = null;
+    }
+    
+    // Remove overlay with animation
+    const overlayToRemove = document.getElementById('analysisOverlay');
+    if (overlayToRemove) {
+        overlayToRemove.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => overlayToRemove.remove(), 300);
+    }
+    
+    // Notify server that user confirmed analysis
+    socket.emit('analysisConfirmed');
+}
 
 socket.on('roundEnd', (data) => {
     const roundResult = data.roundResult;

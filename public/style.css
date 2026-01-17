@@ -439,20 +439,21 @@ header h1 {
 
 .action-button .action-name {
     font-weight: bold;
-    font-size: 0.7em;
-    margin-bottom: 5px;
+    font-size: 0.85em;
+    margin-bottom: 8px;
 }
 
 .action-button .action-cost {
-    font-size: 0.6em;
+    font-size: 0.75em;
     opacity: 0.9;
     color: #ffd93d;
 }
 
 .action-button .action-effect {
-    font-size: 0.5em;
-    margin-top: 5px;
+    font-size: 0.65em;
+    margin-top: 8px;
     opacity: 0.8;
+    line-height: 1.4;
 }
 
 .announcement-board {

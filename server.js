@@ -76,21 +76,22 @@ const penalties = {
 
 // Action costs
 const ACTION_COSTS = {
-  goldenSummon: 3,
-  royalAscent: 2,
-  forceCloseDoor: 1,
-  capitalistBlitz: 3,
-  bribeAI: 2,
-  floor1Priority: 2,
-  skipFloors: 3,
-  emergencyCall: 2,
-  priorityBoost: 1
+  deferredSummon: 2,        // Deferred Summon ($2)
+  liquidityLock: 2,         // Liquidity Lock ($2)
+  marketSpoof: 2,           // Market Spoof ($2)
+  shortTheFloor: 3,         // Short the Floor ($3)
+  earlyCommit: 1,           // Early Commit ($1)
+  lateHijack: 2,            // Late Hijack ($2)
+  insuranceProtocol: 2,     // Insurance Protocol ($2)
+  auditShield: 1,           // Audit Shield ($1)
+  hostileTakeover: 4,       // Hostile Takeover ($4)
+  collapseTrigger: 3        // Collapse Trigger ($3)
 };
 
 // Initialize single AI Bot
 function initializeBot(playerFloor) {
   const botFloor = playerFloor === 2 ? 3 : (playerFloor === 5 ? 4 : 2); // Place bot on different floor
-  const initialCredits = 50;
+  const initialCredits = 20;
   
   gameState.bot = {
     id: 'bot_0',
@@ -252,6 +253,47 @@ async function processRound() {
   // Small delay to show bot decisions
   await new Promise(resolve => setTimeout(resolve, 1000));
   
+  // Generate and show round analysis BEFORE executing
+  const roundAnalysis = generateRoundAnalysis();
+  
+  // Emit round analysis to all clients
+  io.emit('roundAnalysis', {
+    round: gameState.currentRound,
+    analysis: roundAnalysis,
+    gameState: getPublicGameState()
+  });
+  
+  // Wait for user confirmation or max 90 seconds
+  await new Promise(resolve => {
+    const maxWaitTime = 90000; // 90 seconds
+    let resolved = false;
+    
+    // Set timeout for max wait time
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    }, maxWaitTime);
+    
+    // Listen for user confirmation
+    const confirmHandler = () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+    
+    // Find player socket and listen for confirmation
+    if (gameState.player) {
+      const playerSocket = io.sockets.sockets.get(gameState.player.id);
+      if (playerSocket) {
+        playerSocket.once('analysisConfirmed', confirmHandler);
+      }
+    }
+  });
+  
   // Execute bids (higher bid wins)
   if (gameState.playerBid) {
     executeBid('player', gameState.playerBid);
@@ -260,13 +302,14 @@ async function processRound() {
     executeBid('bot', gameState.botBid);
   }
   
-  // Execute actions
-  if (gameState.playerAction) {
-    executeAction('player', gameState.playerAction);
-  }
-  if (gameState.botAction) {
-    executeAction('bot', gameState.botAction);
-  }
+  // Execute actions with conflict resolution
+  resolveAndExecuteActions();
+  
+  // Emit state after execution
+  io.emit('gameState', getPublicGameState());
+  
+  // Small delay before movement
+  await new Promise(resolve => setTimeout(resolve, 1000));
   
   // Process elevator movement (move to floor, board, move to destination)
   // Simulate elevator movement over multiple steps
@@ -330,20 +373,278 @@ function executeBid(userType, bidData) {
   }
 }
 
+// Generate round analysis for transparency
+function generateRoundAnalysis() {
+  const analysis = {
+    playerBid: null,
+    botBid: null,
+    playerAction: null,
+    botAction: null,
+    bidWinner: null,
+    elevatorDestination: null,
+    actionEffects: [],
+    summary: ''
+  };
+  
+  // Analyze player bid
+  if (gameState.playerBid) {
+    analysis.playerBid = {
+      amount: gameState.playerBid.bid,
+      floor: gameState.playerBid.floor,
+      direction: gameState.playerBid.direction
+    };
+  }
+  
+  // Analyze bot bid
+  if (gameState.botBid) {
+    analysis.botBid = {
+      amount: gameState.botBid.bid,
+      floor: gameState.botBid.floor,
+      direction: gameState.botBid.direction
+    };
+  }
+  
+  // Analyze player action
+  if (gameState.playerAction) {
+    analysis.playerAction = {
+      type: gameState.playerAction,
+      name: getActionDisplayName(gameState.playerAction),
+      cost: ACTION_COSTS[gameState.playerAction] || 0
+    };
+  }
+  
+  // Analyze bot action
+  if (gameState.botAction) {
+    analysis.botAction = {
+      type: gameState.botAction,
+      name: getActionDisplayName(gameState.botAction),
+      cost: ACTION_COSTS[gameState.botAction] || 0
+    };
+  }
+  
+  // Determine bid winner
+  const playerBidAmount = gameState.playerBid?.bid || 0;
+  const botBidAmount = gameState.botBid?.bid || 0;
+  
+  if (playerBidAmount > botBidAmount) {
+    analysis.bidWinner = 'player';
+    analysis.elevatorDestination = {
+      floor: gameState.playerBid.floor,
+      reason: `Your bid ($${playerBidAmount}) is higher than AI Bot's bid ($${botBidAmount})`
+    };
+  } else if (botBidAmount > playerBidAmount) {
+    analysis.bidWinner = 'bot';
+    analysis.elevatorDestination = {
+      floor: gameState.botBid.floor,
+      reason: `AI Bot's bid ($${botBidAmount}) is higher than your bid ($${playerBidAmount})`
+    };
+  } else if (playerBidAmount === botBidAmount && playerBidAmount > 0) {
+    analysis.bidWinner = 'player';
+    analysis.elevatorDestination = {
+      floor: gameState.playerBid.floor,
+      reason: `Tie bid ($${playerBidAmount}). Your bid was submitted first.`
+    };
+  } else {
+    analysis.bidWinner = null;
+    analysis.elevatorDestination = null;
+  }
+  
+  // Analyze action effects
+  if (gameState.playerAction && gameState.botAction && gameState.playerAction === gameState.botAction) {
+    analysis.actionEffects.push({
+      type: 'conflict',
+      message: `Both players used ${getActionDisplayName(gameState.playerAction)}! Conflict resolution applies.`
+    });
+  }
+  
+  if (gameState.playerAction) {
+    analysis.actionEffects.push({
+      type: 'player',
+      message: `You will use ${getActionDisplayName(gameState.playerAction)} ($${ACTION_COSTS[gameState.playerAction] || 0})`
+    });
+  }
+  
+  if (gameState.botAction) {
+    analysis.actionEffects.push({
+      type: 'bot',
+      message: `AI Bot will use ${getActionDisplayName(gameState.botAction)} ($${ACTION_COSTS[gameState.botAction] || 0})`
+    });
+  }
+  
+  // Generate summary
+  let summary = '📊 ROUND ANALYSIS\n\n';
+  
+  if (analysis.bidWinner === 'player') {
+    summary += `🎯 ELEVATOR: Goes to Floor ${analysis.elevatorDestination.floor} (YOUR floor)\n`;
+    summary += `💰 ${analysis.elevatorDestination.reason}\n`;
+  } else if (analysis.bidWinner === 'bot') {
+    summary += `🎯 ELEVATOR: Goes to Floor ${analysis.elevatorDestination.floor} (AI Bot's floor)\n`;
+    summary += `💰 ${analysis.elevatorDestination.reason}\n`;
+  } else {
+    summary += `🎯 ELEVATOR: No valid bids this round\n`;
+  }
+  
+  if (analysis.actionEffects.length > 0) {
+    summary += '\n⚡ ACTIONS:\n';
+    analysis.actionEffects.forEach(effect => {
+      summary += `• ${effect.message}\n`;
+    });
+  }
+  
+  analysis.summary = summary;
+  
+  return analysis;
+}
+
+// Action Conflict Resolution System
+function resolveAndExecuteActions() {
+  // Collect all actions with metadata
+  const actions = [];
+  
+  if (gameState.playerAction) {
+    const player = gameState.player;
+    if (player) {
+      actions.push({
+        userType: 'player',
+        userId: player.id,
+        user: player,
+        actionType: gameState.playerAction,
+        bidPower: gameState.playerBid ? gameState.playerBid.bid : 0,
+        cost: ACTION_COSTS[gameState.playerAction] || 0,
+        timestamp: Date.now()
+      });
+    }
+  }
+  
+  if (gameState.botAction) {
+    const bot = gameState.bot;
+    if (bot) {
+      actions.push({
+        userType: 'bot',
+        userId: bot.id,
+        user: bot,
+        actionType: gameState.botAction,
+        bidPower: gameState.botBid ? gameState.botBid.bid : 0,
+        cost: ACTION_COSTS[gameState.botAction] || 0,
+        timestamp: Date.now() + 1
+      });
+    }
+  }
+  
+  if (actions.length === 0) return;
+  
+  // Separate defensive and offensive actions
+  const defensiveActions = actions.filter(a => a.actionType === 'auditShield');
+  const offensiveActions = actions.filter(a => a.actionType !== 'auditShield');
+  
+  // Process defensive actions first
+  defensiveActions.forEach(action => {
+    executeAction(action.userType, action.actionType, true);
+  });
+  
+  // Group actions by type for conflict resolution
+  const actionsByType = {};
+  offensiveActions.forEach(action => {
+    if (!actionsByType[action.actionType]) {
+      actionsByType[action.actionType] = [];
+    }
+    actionsByType[action.actionType].push(action);
+  });
+  
+  // Resolve conflicts for each action type
+  Object.keys(actionsByType).forEach(actionType => {
+    const conflictingActions = actionsByType[actionType];
+    
+    if (conflictingActions.length === 1) {
+      const action = conflictingActions[0];
+      executeAction(action.userType, action.actionType, false);
+    } else {
+      resolveActionConflict(actionType, conflictingActions);
+    }
+  });
+}
+
+// Resolve conflicts for same action type
+function resolveActionConflict(actionType, conflictingActions) {
+  if (actionType === 'hostileTakeover') {
+    resolveHostileTakeoverConflict(conflictingActions);
+    return;
+  }
+  
+  if (actionType === 'marketSpoof') {
+    resolveMarketSpoofConflict(conflictingActions);
+    return;
+  }
+  
+  // Sort by priority: bidPower (desc), cost (desc), timestamp (asc)
+  conflictingActions.sort((a, b) => {
+    if (b.bidPower !== a.bidPower) return b.bidPower - a.bidPower;
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return a.timestamp - b.timestamp;
+  });
+  
+  const winner = conflictingActions[0];
+  
+  // Execute winner's action
+  executeAction(winner.userType, winner.actionType, false);
+  
+  // Early Commit allows multiple
+  if (actionType === 'earlyCommit') {
+    conflictingActions.slice(1).forEach(action => {
+      executeAction(action.userType, action.actionType, false);
+    });
+  }
+}
+
+// Special handling for Hostile Takeover
+function resolveHostileTakeoverConflict(conflictingActions) {
+  conflictingActions.sort((a, b) => b.bidPower - a.bidPower);
+  const winner = conflictingActions[0];
+  
+  executeAction(winner.userType, winner.actionType, false);
+  
+  // Others fail and get 50% refund
+  conflictingActions.slice(1).forEach(failedAction => {
+    const refund = Math.floor(failedAction.cost * 0.5);
+    failedAction.user.credits += refund;
+    
+    gameState.announcements.unshift({
+      time: Date.now(),
+      bot: failedAction.user.nickname,
+      action: 'Action Failed',
+      message: `${failedAction.user.nickname}'s Hostile Takeover failed. Refunded $${refund}`
+    });
+  });
+}
+
+// Special handling for Market Spoof
+function resolveMarketSpoofConflict(conflictingActions) {
+  conflictingActions.sort((a, b) => b.bidPower - a.bidPower);
+  const winner = conflictingActions[0];
+  
+  executeAction(winner.userType, winner.actionType, false);
+}
+
 // Execute action for player or bot
-function executeAction(userType, actionType) {
+function executeAction(userType, actionType, isDefensive = false) {
   const user = userType === 'player' ? gameState.player : gameState.bot;
   if (!user || !actionType) return;
   
   const cost = ACTION_COSTS[actionType];
-  if (!cost || user.credits < cost) return;
+  if (!cost) return;
   
-  user.credits -= cost;
+  // Deduct cost
+  if (user.credits >= cost) {
+    user.credits -= cost;
+  } else {
+    return; // Cannot afford
+  }
+  
   gameState.totalActions++;
   gameState.disruptionScore += 2;
   
   // Handle action effects
-  handleAction(user.id, actionType);
+  handleAction(user.id, actionType, isDefensive);
   
   gameState.announcements.unshift({
     time: Date.now(),
@@ -357,47 +658,111 @@ function executeAction(userType, actionType) {
 }
 
 // Handle action effects (simplified for round-based system)
-function handleAction(userId, actionType) {
+function handleAction(userId, actionType, isDefensive = false) {
   const elevator = gameState.elevators[0];
+  const user = userId === 'bot_0' ? gameState.bot : gameState.player;
+  
+  // Store action state for conflict resolution tracking
+  if (!gameState.actionStates) {
+    gameState.actionStates = {};
+  }
+  if (!gameState.actionStates[userId]) {
+    gameState.actionStates[userId] = {};
+  }
   
   switch (actionType) {
-    case 'goldenSummon':
-      if (elevator.currentBid && elevator.currentBid.userId === userId) {
-        elevator.activePremiumActions.push('goldenSummon');
+    case 'deferredSummon':
+      // Schedule elevator summon for next round
+      if (!gameState.deferredSummons) {
+        gameState.deferredSummons = [];
+      }
+      gameState.deferredSummons.push({
+        userId: userId,
+        floor: user ? user.floor : 1,
+        round: gameState.currentRound + 1
+      });
+      break;
+    
+    case 'liquidityLock':
+      // Target player's next action costs +$1
+      // This will be applied when they submit next action
+      if (!gameState.liquidityLocks) {
+        gameState.liquidityLocks = new Map();
+      }
+      // Apply to the other player
+      const targetUserId = userId === 'bot_0' ? (gameState.player ? gameState.player.id : null) : 'bot_0';
+      if (targetUserId) {
+        gameState.liquidityLocks.set(targetUserId, (gameState.liquidityLocks.get(targetUserId) || 0) + 1);
       }
       break;
-    case 'royalAscent':
-      if (elevator.currentBid && elevator.currentBid.userId === userId) {
-        elevator.activePremiumActions.push('royalAscent');
+    
+    case 'marketSpoof':
+      // Fake high-value bid that influences AI (handled in conflict resolution)
+      if (!gameState.marketSpoofs) {
+        gameState.marketSpoofs = [];
+      }
+      const bidAmount = gameState.playerBid ? (userId === 'bot_0' ? gameState.botBid?.bid : gameState.playerBid.bid) : 0;
+      gameState.marketSpoofs.push({
+        userId: userId,
+        fakeBid: bidAmount,
+        round: gameState.currentRound
+      });
+      break;
+    
+    case 'shortTheFloor':
+      // All bids targeting chosen floor have -50% effectiveness
+      // Implementation would require floor selection UI
+      break;
+    
+    case 'earlyCommit':
+      // Action resolves first (handled in conflict resolution order)
+      gameState.actionStates[userId].earlyCommit = true;
+      break;
+    
+    case 'lateHijack':
+      // Cancel one target player's action at end of round
+      if (!gameState.pendingLateHijacks) {
+        gameState.pendingLateHijacks = [];
+      }
+      const targetId = userId === 'bot_0' ? (gameState.player ? gameState.player.id : null) : 'bot_0';
+      if (targetId) {
+        gameState.pendingLateHijacks.push({
+          hijackerId: userId,
+          targetId: targetId,
+          round: gameState.currentRound
+        });
       }
       break;
-    case 'forceCloseDoor':
-      if (elevator.currentBid && elevator.currentBid.userId !== userId) {
-        // Cancel other bid
-        const prevUserId = elevator.currentBid.userId;
-        if (prevUserId === 'bot_0' && gameState.bot) {
-          gameState.bot.credits += elevator.currentBid.bid;
-        } else if (gameState.player && prevUserId === gameState.player.id) {
-          gameState.player.credits += elevator.currentBid.bid;
-        }
-        elevator.currentBid = null;
-        elevator.targetFloor = null;
-        elevator.state = 'idle';
+    
+    case 'insuranceProtocol':
+      // If next elevator action fails, refund cost and allow retry
+      if (!gameState.insuranceProtocols) {
+        gameState.insuranceProtocols = new Map();
       }
+      gameState.insuranceProtocols.set(userId, gameState.currentRound);
       break;
-    case 'skipFloors':
-      if (elevator.currentBid && elevator.currentBid.userId === userId) {
-        elevator.currentBid.destination = 1;
-        elevator.activePremiumActions.push('skipFloors');
+    
+    case 'auditShield':
+      // Negates first hostile action targeting player (handled in conflict resolution)
+      if (!gameState.auditShields) {
+        gameState.auditShields = new Map();
       }
+      gameState.auditShields.set(userId, gameState.currentRound);
       break;
-    case 'floor1Priority':
-      if (elevator.currentBid && elevator.currentBid.userId === userId) {
-        elevator.currentBid.destination = 1;
-        elevator.activePremiumActions.push('floor1Priority');
-      }
+    
+    case 'hostileTakeover':
+      // Override elevator AI decision logic for this round
+      gameState.actionStates[userId].hostileTakeover = true;
       break;
-    // Other actions can be added here
+    
+    case 'collapseTrigger':
+      // Increase system stress by +25%
+      gameState.disruptionScore += Math.floor(gameState.disruptionScore * 0.25) + 5;
+      break;
+    
+    // Legacy actions (kept for compatibility)
+    default:
+      break;
   }
 }
 
@@ -704,7 +1069,7 @@ io.on('connection', (socket) => {
     // Initialize bot
     initializeBot(playerFloor);
     
-    const initialCredits = 50;
+    const initialCredits = 20;
     gameState.player = {
       id: socket.id,
       nickname: nickname.trim(),
