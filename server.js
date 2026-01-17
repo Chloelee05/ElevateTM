@@ -26,7 +26,7 @@ app.use(express.json());
 // 4. For Node.js < 18, install node-fetch: npm install node-fetch
 const AI_AGENT_API_URL = process.env.AI_AGENT_API_URL || 'http://localhost:3001/api/ai-agent'; // TODO: Update with actual API URL
 
-// Game State (In-Memory) - Round-based system
+// Game State (In-Memory) - Round-based passenger collection system
 const gameState = {
   player: null, // Single player
   bot: null, // Single AI bot
@@ -35,18 +35,20 @@ const gameState = {
       id: 0, 
       currentFloor: 1, 
       targetFloor: null, 
-      state: 'idle', 
-      currentBid: null, // {userId, bid, floor, destination, premiumActions: []}
+      state: 'arriving', 
+      currentBid: null,
       locked: false, 
       lockedBy: null,
-      activePremiumActions: []
+      activePremiumActions: [],
+      passengers: 0 // Number of passengers in this elevator (1-5)
     }
   ],
-  floors: 5, // Changed from 10 to 5
+  lobbyFloor: 1, // Both players are at lobby (center)
+  goalPassengers: 20, // First to 20 passengers wins
   currentRound: 1,
-  maxRounds: 10, // Maximum number of rounds
+  maxRounds: 20, // Maximum number of rounds
   roundPhase: 'waiting', // 'waiting', 'bidding', 'actions', 'processing', 'roundEnd'
-  playerBid: null, // Player's bid for current round {bid, floor, direction}
+  playerBid: null, // Player's bid for current round
   playerAction: null, // Player's action for current round
   botBid: null, // Bot's bid for current round
   botAction: null, // Bot's action for current round
@@ -58,7 +60,6 @@ const gameState = {
   totalVIPUsage: 0,
   totalActions: 0,
   announcements: [],
-  playerFloor: null, // Player's starting floor (2-5)
   maxBidReached: 0,
   roundResults: [] // History of round results
 };
@@ -74,35 +75,271 @@ const penalties = {
   capitalistBlitzUntil: new Map()
 };
 
-// Action costs
+// Action costs - adjusted for passenger collection game
 const ACTION_COSTS = {
-  deferredSummon: 2,        // Deferred Summon ($2)
-  liquidityLock: 2,         // Liquidity Lock ($2)
-  marketSpoof: 2,           // Market Spoof ($2)
-  shortTheFloor: 3,         // Short the Floor ($3)
-  earlyCommit: 1,           // Early Commit ($1)
-  lateHijack: 2,            // Late Hijack ($2)
-  insuranceProtocol: 2,     // Insurance Protocol ($2)
-  auditShield: 1,           // Audit Shield ($1)
-  hostileTakeover: 4,       // Hostile Takeover ($4)
-  collapseTrigger: 3        // Collapse Trigger ($3)
+  passengerBonus: 2,        // Passenger Bonus ($2) - If you win, get +1 extra passenger
+  crowdControl: 2,          // Crowd Control ($2) - Target's next bid has -50% effectiveness
+  vipCall: 3,               // VIP Call ($3) - Next elevator has guaranteed 4-5 passengers
+  rushHour: 1,              // Rush Hour ($1) - Your bid resolves first this round
+  diversion: 2,             // Diversion ($2) - Cancel opponent's action this round
+  safetyNet: 2,             // Safety Net ($2) - If you lose, get half the passengers (rounded down)
+  priorityPass: 1,          // Priority Pass ($1) - Negates first hostile action against you
+  fullCapacity: 4,          // Full Capacity ($4) - Double the passengers on current elevator
+  sabotage: 3,              // Sabotage ($3) - If opponent wins, they get -2 passengers (min 0)
+  luckyDraw: 2              // Lucky Draw ($2) - Random chance (50%) to steal 1 passenger from opponent
 };
 
 // Initialize single AI Bot
-function initializeBot(playerFloor) {
-  const botFloor = playerFloor === 2 ? 3 : (playerFloor === 5 ? 4 : 2); // Place bot on different floor
-  const initialCredits = 20;
+function initializeBot() {
+  const initialCredits = 100;
   
   gameState.bot = {
     id: 'bot_0',
     nickname: 'AI Bot',
     credits: initialCredits,
-    floor: botFloor,
-    destination: 1,
-    inElevator: false,
-    elevatorId: null,
+    passengers: 0, // Collected passengers count
+    floor: gameState.lobbyFloor, // Same floor as player (lobby)
     lastActionTime: Date.now(),
     actionCooldown: 3000
+  };
+}
+
+// Generate random passengers for elevator (1-5)
+function generateElevatorPassengers() {
+  const passengers = Math.floor(Math.random() * 5) + 1; // 1-5 passengers
+  gameState.elevators[0].passengers = passengers;
+  gameState.elevators[0].state = 'arriving';
+  return passengers;
+}
+
+// Process passenger collection - determine winner and award passengers
+function processPassengerCollection() {
+  const elevator = gameState.elevators[0];
+  let passengersToAward = elevator.passengers || 0;
+  
+  // Track action effects for display
+  const actionEffects = [];
+  
+  // Initialize action states if not exists
+  if (!gameState.actionStates) {
+    gameState.actionStates = { player: {}, bot: {} };
+  }
+  
+  const playerStates = gameState.actionStates.player || {};
+  const botStates = gameState.actionStates.bot || {};
+  
+  // Get base bid amounts
+  let playerBidAmount = gameState.playerBid?.bid || 0;
+  let botBidAmount = gameState.botBid?.bid || 0;
+  
+  // Apply CROWD CONTROL - reduce opponent's bid by 50%
+  if (playerStates.crowdControlTarget && botBidAmount > 0) {
+    const originalBotBid = botBidAmount;
+    botBidAmount = Math.floor(botBidAmount * 0.5);
+    actionEffects.push({
+      type: 'crowdControl',
+      target: 'bot',
+      message: `🚫 Crowd Control: AI Bot's bid reduced $${originalBotBid} → $${botBidAmount}!`
+    });
+    console.log(`Crowd Control: Bot's bid reduced from $${originalBotBid} to $${botBidAmount}`);
+  }
+  if (botStates.crowdControlTarget && playerBidAmount > 0) {
+    const originalPlayerBid = playerBidAmount;
+    playerBidAmount = Math.floor(playerBidAmount * 0.5);
+    actionEffects.push({
+      type: 'crowdControl',
+      target: 'player',
+      message: `🚫 Crowd Control: Your bid reduced $${originalPlayerBid} → $${playerBidAmount}!`
+    });
+    console.log(`Crowd Control: Player's bid reduced from $${originalPlayerBid} to $${playerBidAmount}`);
+  }
+  
+  // Apply FULL CAPACITY - double passengers (whoever used it)
+  if (playerStates.fullCapacity || botStates.fullCapacity) {
+    const originalPassengers = passengersToAward;
+    passengersToAward = passengersToAward * 2;
+    const who = playerStates.fullCapacity ? 'You' : 'AI Bot';
+    actionEffects.push({
+      type: 'fullCapacity',
+      message: `👥 Full Capacity: ${who} doubled passengers ${originalPassengers} → ${passengersToAward}!`
+    });
+    console.log(`Full Capacity: Passengers doubled from ${originalPassengers} to ${passengersToAward}`);
+  }
+  
+  let winner = null;
+  let winReason = '';
+  
+  // Determine winner based on bid (with RUSH HOUR consideration for ties)
+  if (playerBidAmount > botBidAmount) {
+    winner = 'player';
+    winReason = `Your bid ($${playerBidAmount}) beat AI Bot's bid ($${botBidAmount})`;
+  } else if (botBidAmount > playerBidAmount) {
+    winner = 'bot';
+    winReason = `AI Bot's bid ($${botBidAmount}) beat your bid ($${playerBidAmount})`;
+  } else if (playerBidAmount === botBidAmount && playerBidAmount > 0) {
+    // Tie - check RUSH HOUR
+    if (playerStates.rushHour && !botStates.rushHour) {
+      winner = 'player';
+      winReason = `Tie at $${playerBidAmount}! You won with Rush Hour priority!`;
+      actionEffects.push({
+        type: 'rushHour',
+        message: `⚡ Rush Hour: You won the tie with priority!`
+      });
+    } else if (botStates.rushHour && !playerStates.rushHour) {
+      winner = 'bot';
+      winReason = `Tie at $${playerBidAmount}! AI Bot won with Rush Hour priority!`;
+      actionEffects.push({
+        type: 'rushHour',
+        message: `⚡ Rush Hour: AI Bot won the tie with priority!`
+      });
+    } else {
+      // Both have or both don't have Rush Hour - random
+      winner = Math.random() < 0.5 ? 'player' : 'bot';
+      winReason = `Tie at $${playerBidAmount}! ${winner === 'player' ? 'You' : 'AI Bot'} won by random selection`;
+    }
+  } else {
+    // No valid bids
+    winReason = 'No valid bids submitted';
+  }
+  
+  let actualPassengersAwarded = passengersToAward;
+  const loser = winner === 'player' ? 'bot' : 'player';
+  
+  // Award passengers to winner
+  if (winner === 'player' && gameState.player) {
+    // Apply PASSENGER BONUS - +1 extra passenger if player wins
+    if (playerStates.passengerBonus) {
+      actualPassengersAwarded += 1;
+      actionEffects.push({
+        type: 'passengerBonus',
+        message: `🎁 Passenger Bonus: You got +1 extra passenger!`
+      });
+      console.log(`Passenger Bonus: Player gets +1 extra passenger`);
+    }
+    
+    // Apply SABOTAGE from bot - if player wins, player gets -2 passengers
+    if (botStates.sabotage) {
+      const before = actualPassengersAwarded;
+      actualPassengersAwarded = Math.max(0, actualPassengersAwarded - 2);
+      actionEffects.push({
+        type: 'sabotage',
+        message: `💣 Sabotage: AI Bot's sabotage reduced your passengers ${before} → ${actualPassengersAwarded}!`
+      });
+      console.log(`Sabotage: Player loses 2 passengers from winning (now ${actualPassengersAwarded})`);
+    }
+    
+    gameState.player.passengers = (gameState.player.passengers || 0) + actualPassengersAwarded;
+    gameState.player.credits = Math.max(0, gameState.player.credits - (gameState.playerBid?.bid || 0));
+    console.log(`Player wins! Awarded ${actualPassengersAwarded} passengers. Total: ${gameState.player.passengers}`);
+    
+    // Apply SAFETY NET for bot - if bot loses, get half passengers
+    if (botStates.safetyNet && gameState.bot) {
+      const safetyPassengers = Math.floor(passengersToAward / 2);
+      if (safetyPassengers > 0) {
+        gameState.bot.passengers = (gameState.bot.passengers || 0) + safetyPassengers;
+        actionEffects.push({
+          type: 'safetyNet',
+          message: `🛡 Safety Net: AI Bot got ${safetyPassengers} passengers despite losing!`
+        });
+        console.log(`Safety Net: Bot gets ${safetyPassengers} passengers despite losing`);
+      }
+    }
+    
+  } else if (winner === 'bot' && gameState.bot) {
+    // Apply PASSENGER BONUS - +1 extra passenger if bot wins
+    if (botStates.passengerBonus) {
+      actualPassengersAwarded += 1;
+      actionEffects.push({
+        type: 'passengerBonus',
+        message: `🎁 Passenger Bonus: AI Bot got +1 extra passenger!`
+      });
+      console.log(`Passenger Bonus: Bot gets +1 extra passenger`);
+    }
+    
+    // Apply SABOTAGE from player - if bot wins, bot gets -2 passengers
+    if (playerStates.sabotage) {
+      const before = actualPassengersAwarded;
+      actualPassengersAwarded = Math.max(0, actualPassengersAwarded - 2);
+      actionEffects.push({
+        type: 'sabotage',
+        message: `💣 Sabotage: Your sabotage reduced AI Bot's passengers ${before} → ${actualPassengersAwarded}!`
+      });
+      console.log(`Sabotage: Bot loses 2 passengers from winning (now ${actualPassengersAwarded})`);
+    }
+    
+    gameState.bot.passengers = (gameState.bot.passengers || 0) + actualPassengersAwarded;
+    gameState.bot.credits = Math.max(0, gameState.bot.credits - (gameState.botBid?.bid || 0));
+    console.log(`Bot wins! Awarded ${actualPassengersAwarded} passengers. Total: ${gameState.bot.passengers}`);
+    
+    // Apply SAFETY NET for player - if player loses, get half passengers
+    if (playerStates.safetyNet && gameState.player) {
+      const safetyPassengers = Math.floor(passengersToAward / 2);
+      if (safetyPassengers > 0) {
+        gameState.player.passengers = (gameState.player.passengers || 0) + safetyPassengers;
+        actionEffects.push({
+          type: 'safetyNet',
+          message: `🛡 Safety Net: You got ${safetyPassengers} passengers despite losing!`
+        });
+        console.log(`Safety Net: Player gets ${safetyPassengers} passengers despite losing`);
+      }
+    }
+  }
+  
+  // Deduct bid from loser
+  if (winner === 'player' && gameState.bot && (gameState.botBid?.bid || 0) > 0) {
+    gameState.bot.credits = Math.max(0, gameState.bot.credits - (gameState.botBid?.bid || 0));
+  } else if (winner === 'bot' && gameState.player && (gameState.playerBid?.bid || 0) > 0) {
+    gameState.player.credits = Math.max(0, gameState.player.credits - (gameState.playerBid?.bid || 0));
+  }
+  
+  // Apply LUCKY DRAW - 50% chance to steal 1 passenger from opponent
+  if (playerStates.luckyDraw) {
+    if (Math.random() < 0.5 && gameState.bot && gameState.bot.passengers > 0) {
+      gameState.bot.passengers -= 1;
+      gameState.player.passengers = (gameState.player.passengers || 0) + 1;
+      actionEffects.push({
+        type: 'luckyDraw',
+        message: `🎲 Lucky Draw SUCCESS: You stole 1 passenger from AI Bot!`
+      });
+      console.log(`Lucky Draw: Player stole 1 passenger from Bot!`);
+    } else {
+      actionEffects.push({
+        type: 'luckyDraw',
+        message: `🎲 Lucky Draw FAILED: Bad luck, no steal this time!`
+      });
+    }
+  }
+  if (botStates.luckyDraw) {
+    if (Math.random() < 0.5 && gameState.player && gameState.player.passengers > 0) {
+      gameState.player.passengers -= 1;
+      gameState.bot.passengers = (gameState.bot.passengers || 0) + 1;
+      actionEffects.push({
+        type: 'luckyDraw',
+        message: `🎲 Lucky Draw: AI Bot stole 1 passenger from you!`
+      });
+      console.log(`Lucky Draw: Bot stole 1 passenger from Player!`);
+    } else {
+      actionEffects.push({
+        type: 'luckyDraw',
+        message: `🎲 Lucky Draw FAILED: AI Bot's steal attempt failed!`
+      });
+    }
+  }
+  
+  // Combine pending action effects (from handleAction) with local action effects
+  const allActionEffects = [...(gameState.pendingActionEffects || []), ...actionEffects];
+  
+  // Clear elevator passengers and action states for next round
+  elevator.passengers = 0;
+  elevator.currentBid = null;
+  gameState.actionStates = { player: {}, bot: {} };
+  gameState.pendingActionEffects = [];
+  
+  return {
+    winner,
+    passengersAwarded: actualPassengersAwarded,
+    winReason,
+    actionEffects: allActionEffects
   };
 }
 
@@ -190,22 +427,21 @@ async function callAIAgent() {
 // This will be replaced by calling Moe/Jason's AI agent API
 function makeSimpleBotDecision() {
   const bot = gameState.bot;
-  if (!bot || bot.credits <= 0) {
+  if (!bot) {
     return { bid: null, action: null };
   }
   
-  // Random strategy: bid 1-10 credits randomly, use action 70% of the time
+  // Bid: 1-15 credits randomly (but not more than bot has)
   const canBid = bot.credits > 0;
+  const bidAmount = canBid ? Math.min(bot.credits, Math.floor(Math.random() * 15) + 1) : 0;
+  const bid = canBid ? bidAmount : null;
+  
+  // Action: ALWAYS select an action if can afford any
   const minActionCost = Math.min(...Object.values(ACTION_COSTS));
   const canUseAction = bot.credits >= minActionCost;
   
-  // Bid: 1-10 credits randomly (but not more than bot has)
-  const bidAmount = Math.min(bot.credits, Math.floor(Math.random() * 10) + 1);
-  const bid = canBid ? bidAmount : null;
-  
-  // Action: 70% chance to use action if can afford
   let action = null;
-  if (canUseAction && Math.random() < 0.7) {
+  if (canUseAction) {
     // Randomly select from available actions that bot can afford
     const affordableActions = Object.keys(ACTION_COSTS).filter(
       actionType => ACTION_COSTS[actionType] <= bot.credits
@@ -228,6 +464,9 @@ async function processRound() {
   if (gameState.roundPhase !== 'processing') return;
   
   console.log(`Processing Round ${gameState.currentRound}...`);
+  
+  // Initialize action states for this round
+  gameState.actionStates = { player: {}, bot: {} };
   
   // Emit processing state
   io.emit('roundProcessing', {
@@ -294,26 +533,31 @@ async function processRound() {
     }
   });
   
-  // Execute bids (higher bid wins)
-  if (gameState.playerBid) {
-    executeBid('player', gameState.playerBid);
-  }
-  if (gameState.botBid) {
-    executeBid('bot', gameState.botBid);
-  }
-  
-  // Execute actions with conflict resolution
+  // Execute actions with conflict resolution (before bid processing)
   resolveAndExecuteActions();
+  
+  // Determine bid winner and award passengers
+  const roundResult = processPassengerCollection();
   
   // Emit state after execution
   io.emit('gameState', getPublicGameState());
   
-  // Small delay before movement
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // Emit round result with action effects
+  io.emit('roundResult', {
+    round: gameState.currentRound,
+    winner: roundResult.winner,
+    passengersAwarded: roundResult.passengersAwarded,
+    playerTotal: gameState.player?.passengers || 0,
+    botTotal: gameState.bot?.passengers || 0,
+    actionEffects: roundResult.actionEffects || [],
+    gameState: getPublicGameState()
+  });
   
-  // Process elevator movement (move to floor, board, move to destination)
-  // Simulate elevator movement over multiple steps
-  await processElevatorMovement();
+  // Wait for animation to complete (9 seconds - animation is 8s max + fade)
+  await new Promise(resolve => setTimeout(resolve, 9000));
+  
+  // Generate new elevator with random passengers for next round
+  generateElevatorPassengers();
   
   // Check for win conditions
   const gameEnded = checkWinConditions();
@@ -375,13 +619,16 @@ function executeBid(userType, bidData) {
 
 // Generate round analysis for transparency
 function generateRoundAnalysis() {
+  const elevator = gameState.elevators[0];
+  const passengers = elevator.passengers || 0;
+  
   const analysis = {
     playerBid: null,
     botBid: null,
     playerAction: null,
     botAction: null,
     bidWinner: null,
-    elevatorDestination: null,
+    passengersAtStake: passengers,
     actionEffects: [],
     summary: ''
   };
@@ -389,18 +636,14 @@ function generateRoundAnalysis() {
   // Analyze player bid
   if (gameState.playerBid) {
     analysis.playerBid = {
-      amount: gameState.playerBid.bid,
-      floor: gameState.playerBid.floor,
-      direction: gameState.playerBid.direction
+      amount: gameState.playerBid.bid
     };
   }
   
   // Analyze bot bid
   if (gameState.botBid) {
     analysis.botBid = {
-      amount: gameState.botBid.bid,
-      floor: gameState.botBid.floor,
-      direction: gameState.botBid.direction
+      amount: gameState.botBid.bid
     };
   }
   
@@ -428,25 +671,16 @@ function generateRoundAnalysis() {
   
   if (playerBidAmount > botBidAmount) {
     analysis.bidWinner = 'player';
-    analysis.elevatorDestination = {
-      floor: gameState.playerBid.floor,
-      reason: `Your bid ($${playerBidAmount}) is higher than AI Bot's bid ($${botBidAmount})`
-    };
+    analysis.winReason = `Your bid ($${playerBidAmount}) beats AI Bot's bid ($${botBidAmount})`;
   } else if (botBidAmount > playerBidAmount) {
     analysis.bidWinner = 'bot';
-    analysis.elevatorDestination = {
-      floor: gameState.botBid.floor,
-      reason: `AI Bot's bid ($${botBidAmount}) is higher than your bid ($${playerBidAmount})`
-    };
+    analysis.winReason = `AI Bot's bid ($${botBidAmount}) beats your bid ($${playerBidAmount})`;
   } else if (playerBidAmount === botBidAmount && playerBidAmount > 0) {
     analysis.bidWinner = 'player';
-    analysis.elevatorDestination = {
-      floor: gameState.playerBid.floor,
-      reason: `Tie bid ($${playerBidAmount}). Your bid was submitted first.`
-    };
+    analysis.winReason = `Tie bid ($${playerBidAmount}). Your bid was submitted first.`;
   } else {
     analysis.bidWinner = null;
-    analysis.elevatorDestination = null;
+    analysis.winReason = 'No bids this round';
   }
   
   // Analyze action effects
@@ -474,14 +708,16 @@ function generateRoundAnalysis() {
   // Generate summary
   let summary = '📊 ROUND ANALYSIS\n\n';
   
+  summary += `🚶 PASSENGERS AT STAKE: ${analysis.passengersAtStake}\n\n`;
+  
   if (analysis.bidWinner === 'player') {
-    summary += `🎯 ELEVATOR: Goes to Floor ${analysis.elevatorDestination.floor} (YOUR floor)\n`;
-    summary += `💰 ${analysis.elevatorDestination.reason}\n`;
+    summary += `🎉 YOU WIN THIS ROUND!\n`;
+    summary += `💰 ${analysis.winReason}\n`;
   } else if (analysis.bidWinner === 'bot') {
-    summary += `🎯 ELEVATOR: Goes to Floor ${analysis.elevatorDestination.floor} (AI Bot's floor)\n`;
-    summary += `💰 ${analysis.elevatorDestination.reason}\n`;
+    summary += `😢 AI BOT WINS THIS ROUND!\n`;
+    summary += `💰 ${analysis.winReason}\n`;
   } else {
-    summary += `🎯 ELEVATOR: No valid bids this round\n`;
+    summary += `🚫 NO WINNER - No valid bids this round\n`;
   }
   
   if (analysis.actionEffects.length > 0) {
@@ -660,107 +896,119 @@ function executeAction(userType, actionType, isDefensive = false) {
 // Handle action effects (simplified for round-based system)
 function handleAction(userId, actionType, isDefensive = false) {
   const elevator = gameState.elevators[0];
-  const user = userId === 'bot_0' ? gameState.bot : gameState.player;
+  // Determine if this is bot or player based on userId
+  const isBot = userId === 'bot_0' || userId === gameState.bot?.id;
+  const user = isBot ? gameState.bot : gameState.player;
+  const userKey = isBot ? 'bot' : 'player';
   
   // Store action state for conflict resolution tracking
   if (!gameState.actionStates) {
     gameState.actionStates = {};
   }
-  if (!gameState.actionStates[userId]) {
-    gameState.actionStates[userId] = {};
+  if (!gameState.actionStates[userKey]) {
+    gameState.actionStates[userKey] = {};
   }
   
+  // Initialize pending action effects array
+  if (!gameState.pendingActionEffects) {
+    gameState.pendingActionEffects = [];
+  }
+  
+  const isPlayer = userKey === 'player';
+  const userName = isPlayer ? 'You' : 'AI Bot';
+  const opponentName = isPlayer ? 'AI Bot' : 'You';
+  
   switch (actionType) {
-    case 'deferredSummon':
-      // Schedule elevator summon for next round
-      if (!gameState.deferredSummons) {
-        gameState.deferredSummons = [];
-      }
-      gameState.deferredSummons.push({
-        userId: userId,
-        floor: user ? user.floor : 1,
-        round: gameState.currentRound + 1
-      });
+    case 'passengerBonus':
+      // If you win, get +1 extra passenger
+      gameState.actionStates[userKey].passengerBonus = true;
       break;
     
-    case 'liquidityLock':
-      // Target player's next action costs +$1
-      // This will be applied when they submit next action
-      if (!gameState.liquidityLocks) {
-        gameState.liquidityLocks = new Map();
-      }
-      // Apply to the other player
-      const targetUserId = userId === 'bot_0' ? (gameState.player ? gameState.player.id : null) : 'bot_0';
-      if (targetUserId) {
-        gameState.liquidityLocks.set(targetUserId, (gameState.liquidityLocks.get(targetUserId) || 0) + 1);
-      }
+    case 'crowdControl':
+      // Target player's next bid has -50% effectiveness
+      const targetKey = userKey === 'bot' ? 'player' : 'bot';
+      gameState.actionStates[targetKey].crowdControlTarget = true;
       break;
     
-    case 'marketSpoof':
-      // Fake high-value bid that influences AI (handled in conflict resolution)
-      if (!gameState.marketSpoofs) {
-        gameState.marketSpoofs = [];
-      }
-      const bidAmount = gameState.playerBid ? (userId === 'bot_0' ? gameState.botBid?.bid : gameState.playerBid.bid) : 0;
-      gameState.marketSpoofs.push({
-        userId: userId,
-        fakeBid: bidAmount,
-        round: gameState.currentRound
-      });
-      break;
-    
-    case 'shortTheFloor':
-      // All bids targeting chosen floor have -50% effectiveness
-      // Implementation would require floor selection UI
-      break;
-    
-    case 'earlyCommit':
-      // Action resolves first (handled in conflict resolution order)
-      gameState.actionStates[userId].earlyCommit = true;
-      break;
-    
-    case 'lateHijack':
-      // Cancel one target player's action at end of round
-      if (!gameState.pendingLateHijacks) {
-        gameState.pendingLateHijacks = [];
-      }
-      const targetId = userId === 'bot_0' ? (gameState.player ? gameState.player.id : null) : 'bot_0';
-      if (targetId) {
-        gameState.pendingLateHijacks.push({
-          hijackerId: userId,
-          targetId: targetId,
-          round: gameState.currentRound
+    case 'vipCall':
+      // Next elevator has guaranteed 4-5 passengers
+      if (!gameState.vipCallActive) {
+        gameState.vipCallActive = userId;
+        const oldPassengers = elevator.passengers;
+        elevator.passengers = Math.floor(Math.random() * 2) + 4; // 4-5 passengers
+        gameState.pendingActionEffects.push({
+          type: 'vipCall',
+          message: `⭐ VIP Call: ${userName} upgraded elevator to ${elevator.passengers} passengers!`
         });
       }
       break;
     
-    case 'insuranceProtocol':
-      // If next elevator action fails, refund cost and allow retry
-      if (!gameState.insuranceProtocols) {
-        gameState.insuranceProtocols = new Map();
+    case 'rushHour':
+      // Your bid resolves first (priority in tie)
+      gameState.actionStates[userKey].rushHour = true;
+      break;
+    
+    case 'diversion':
+      // Cancel opponent's action this round
+      const opponentKey = userKey === 'bot' ? 'player' : 'bot';
+      const opponentAction = userKey === 'bot' ? gameState.playerAction : gameState.botAction;
+      const opponentActionName = opponentAction ? getActionDisplayName(opponentAction) : null;
+      
+      // Check if opponent has priorityPass
+      if (gameState.actionStates[opponentKey]?.priorityPass) {
+        gameState.actionStates[opponentKey].priorityPass = false; // Used up
+        gameState.pendingActionEffects.push({
+          type: 'priorityPassBlock',
+          message: `🎫 Priority Pass: ${opponentName}'s action was protected from ${userName}'s Diversion!`
+        });
+      } else if (opponentAction) {
+        // Cancel opponent's action
+        if (userKey === 'bot') {
+          gameState.playerAction = null;
+          gameState.pendingActionEffects.push({
+            type: 'diversion',
+            message: `🔄 Diversion: AI Bot cancelled your ${opponentActionName}!`
+          });
+        } else {
+          gameState.botAction = null;
+          gameState.pendingActionEffects.push({
+            type: 'diversion',
+            message: `🔄 Diversion: You cancelled AI Bot's ${opponentActionName}!`
+          });
+        }
+      } else {
+        gameState.pendingActionEffects.push({
+          type: 'diversionMiss',
+          message: `🔄 Diversion: ${userName}'s diversion had no target (${opponentName} had no action)!`
+        });
       }
-      gameState.insuranceProtocols.set(userId, gameState.currentRound);
       break;
     
-    case 'auditShield':
-      // Negates first hostile action targeting player (handled in conflict resolution)
-      if (!gameState.auditShields) {
-        gameState.auditShields = new Map();
-      }
-      gameState.auditShields.set(userId, gameState.currentRound);
+    case 'safetyNet':
+      // If you lose, get half the passengers (rounded down)
+      gameState.actionStates[userKey].safetyNet = true;
       break;
     
-    case 'hostileTakeover':
-      // Override elevator AI decision logic for this round
-      gameState.actionStates[userId].hostileTakeover = true;
+    case 'priorityPass':
+      // Negates first hostile action against you
+      gameState.actionStates[userKey].priorityPass = true;
       break;
     
-    case 'collapseTrigger':
-      // Increase system stress by +25%
-      gameState.disruptionScore += Math.floor(gameState.disruptionScore * 0.25) + 5;
+    case 'fullCapacity':
+      // Double the passengers on current elevator
+      gameState.actionStates[userKey].fullCapacity = true;
       break;
     
-    // Legacy actions (kept for compatibility)
+    case 'sabotage':
+      // If opponent wins, they get -2 passengers (min 0)
+      gameState.actionStates[userKey].sabotage = true;
+      break;
+    
+    case 'luckyDraw':
+      // Random chance (50%) to steal 1 passenger from opponent
+      gameState.actionStates[userKey].luckyDraw = true;
+      break;
+    
     default:
       break;
   }
@@ -869,26 +1117,32 @@ async function processElevatorMovement() {
 
 // Check win conditions
 function checkWinConditions() {
-  // Check if player reached floor 1
-  if (gameState.player && gameState.player.floor === 1) {
+  const playerPassengers = gameState.player?.passengers || 0;
+  const botPassengers = gameState.bot?.passengers || 0;
+  const goal = gameState.goalPassengers;
+  
+  // Check if player reached goal
+  if (playerPassengers >= goal) {
     gameState.systemCollapsed = true;
     io.emit('gameEnd', {
       winner: gameState.player.nickname,
-      reason: '🎉 YOU REACHED FLOOR 1! YOU WIN! 🎉',
+      reason: `🎉 YOU COLLECTED ${playerPassengers} PASSENGERS! YOU WIN! 🎉`,
       round: gameState.currentRound,
-      disruptionScore: gameState.disruptionScore
+      playerPassengers: playerPassengers,
+      botPassengers: botPassengers
     });
     return true;
   }
   
-  // Check if bot reached floor 1
-  if (gameState.bot && gameState.bot.floor === 1) {
+  // Check if bot reached goal
+  if (botPassengers >= goal) {
     gameState.systemCollapsed = true;
     io.emit('gameEnd', {
       winner: gameState.bot.nickname,
-      reason: 'AI Bot reached Floor 1! You lost!',
+      reason: `AI Bot collected ${botPassengers} passengers! You lost!`,
       round: gameState.currentRound,
-      disruptionScore: gameState.disruptionScore
+      playerPassengers: playerPassengers,
+      botPassengers: botPassengers
     });
     return true;
   }
@@ -896,16 +1150,20 @@ function checkWinConditions() {
   // Check if max rounds reached
   if (gameState.currentRound >= gameState.maxRounds) {
     gameState.systemCollapsed = true;
-    const playerDistance = gameState.player ? gameState.player.floor - 1 : 999;
-    const botDistance = gameState.bot ? gameState.bot.floor - 1 : 999;
-    const winner = playerDistance < botDistance ? 
+    const winner = playerPassengers > botPassengers ? 
       gameState.player.nickname : 
-      (botDistance < playerDistance ? gameState.bot.nickname : 'Tie');
+      (botPassengers > playerPassengers ? gameState.bot.nickname : 'Tie');
+    const reason = playerPassengers > botPassengers ?
+      `🎉 YOU WIN! ${playerPassengers} vs ${botPassengers} passengers!` :
+      (botPassengers > playerPassengers ? 
+        `AI Bot wins! ${botPassengers} vs ${playerPassengers} passengers!` :
+        `It's a tie! Both have ${playerPassengers} passengers!`);
     io.emit('gameEnd', {
       winner: winner,
-      reason: 'Maximum rounds reached!',
+      reason: reason,
       round: gameState.currentRound,
-      disruptionScore: gameState.disruptionScore
+      playerPassengers: playerPassengers,
+      botPassengers: botPassengers
     });
     return true;
   }
@@ -957,44 +1215,33 @@ function endRound() {
 }
 
 function getPublicGameState() {
+  const elevator = gameState.elevators[0];
   return {
     player: gameState.player ? {
       id: gameState.player.id,
       nickname: gameState.player.nickname,
       credits: gameState.player.credits,
-      floor: gameState.player.floor,
-      destination: gameState.player.destination,
-      inElevator: gameState.player.inElevator,
-      elevatorId: gameState.player.elevatorId
+      passengers: gameState.player.passengers,
+      floor: gameState.player.floor
     } : null,
     bot: gameState.bot ? {
       id: gameState.bot.id,
       nickname: gameState.bot.nickname,
       credits: gameState.bot.credits,
-      floor: gameState.bot.floor,
-      destination: gameState.bot.destination,
-      inElevator: gameState.bot.inElevator,
-      elevatorId: gameState.bot.elevatorId
+      passengers: gameState.bot.passengers,
+      floor: gameState.bot.floor
     } : null,
-    elevators: gameState.elevators.map(e => ({
-      id: e.id,
-      currentFloor: e.currentFloor,
-      targetFloor: e.targetFloor,
-      state: e.state,
-      locked: e.locked,
-      lockedBy: e.lockedBy,
-      currentBid: e.currentBid ? {
-        userId: e.currentBid.userId,
-        bid: e.currentBid.bid,
-        floor: e.currentBid.floor,
-        destination: e.currentBid.destination,
-        premiumActions: e.currentBid.premiumActions
-      } : null,
-      activePremiumActions: e.activePremiumActions
-    })),
+    elevator: {
+      id: elevator.id,
+      currentFloor: elevator.currentFloor,
+      state: elevator.state,
+      passengers: elevator.passengers,
+      currentBid: elevator.currentBid
+    },
+    lobbyFloor: gameState.lobbyFloor,
+    goalPassengers: gameState.goalPassengers,
     disruptionScore: gameState.disruptionScore,
     systemCollapsed: gameState.systemCollapsed,
-    floors: gameState.floors,
     currentRound: gameState.currentRound,
     maxRounds: gameState.maxRounds,
     roundPhase: gameState.roundPhase,
@@ -1007,16 +1254,16 @@ function getPublicGameState() {
 
 function getActionDisplayName(actionType) {
   const names = {
-    goldenSummon: 'Golden Summon',
-    royalAscent: 'Royal Ascent',
-    floor1Priority: 'Floor 1 Priority',
-    skipFloors: 'Skip Floors',
-    forceCloseDoor: 'Force Close Door',
-    bribeAI: 'Bribe the AI',
-    capitalistBlitz: 'Capitalist Blitz',
-    disableAction: 'Disable Action',
-    emergencyCall: 'Emergency Call',
-    priorityBoost: 'Priority Boost'
+    passengerBonus: 'Passenger Bonus',
+    crowdControl: 'Crowd Control',
+    vipCall: 'VIP Call',
+    rushHour: 'Rush Hour',
+    diversion: 'Diversion',
+    safetyNet: 'Safety Net',
+    priorityPass: 'Priority Pass',
+    fullCapacity: 'Full Capacity',
+    sabotage: 'Sabotage',
+    luckyDraw: 'Lucky Draw'
   };
   return names[actionType] || actionType;
 }
@@ -1037,13 +1284,14 @@ io.on('connection', (socket) => {
       gameState.player = null;
       gameState.bot = null;
       gameState.elevators.forEach(e => {
-        e.currentFloor = 1;
+        e.currentFloor = gameState.lobbyFloor;
         e.targetFloor = null;
-        e.state = 'idle';
+        e.state = 'arriving';
         e.currentBid = null;
         e.locked = false;
         e.lockedBy = null;
         e.activePremiumActions = [];
+        e.passengers = 0;
       });
       gameState.disruptionScore = 0;
       gameState.systemCollapsed = false;
@@ -1056,34 +1304,33 @@ io.on('connection', (socket) => {
       gameState.announcements = [];
       gameState.maxBidReached = 0;
       gameState.roundResults = [];
+      gameState.actionStates = {};
       if (gameState.autoProcessTimeout) {
         clearTimeout(gameState.autoProcessTimeout);
         gameState.autoProcessTimeout = null;
       }
     }
     
-    // Assign player to a random floor (2-5)
-    const playerFloor = Math.floor(Math.random() * 4) + 2;
-    gameState.playerFloor = playerFloor;
-    
     // Initialize bot
-    initializeBot(playerFloor);
+    initializeBot();
     
-    const initialCredits = 20;
+    // Generate first elevator with passengers
+    generateElevatorPassengers();
+    
+    const initialCredits = 100;
     gameState.player = {
       id: socket.id,
       nickname: nickname.trim(),
       credits: initialCredits,
-      floor: playerFloor,
-      destination: 1,
-      inElevator: false,
-      elevatorId: null
+      passengers: 0, // Collected passengers count
+      floor: gameState.lobbyFloor // Same floor as bot (lobby)
     };
     
     socket.emit('joined', {
       userId: socket.id,
       credits: initialCredits,
-      floor: playerFloor,
+      passengers: 0,
+      floor: gameState.lobbyFloor,
       gameState: getPublicGameState()
     });
     
@@ -1108,31 +1355,13 @@ io.on('connection', (socket) => {
       return;
     }
     
-    const { bid, floor, direction } = data;
+    const { bid } = data;
     if (!bid || bid < 1 || bid > gameState.player.credits) {
       socket.emit('error', { message: 'Invalid bid amount' });
       return;
     }
     
-    // Calculate bid limit based on max bid reached
-    const currentMaxBid = gameState.maxBidReached;
-    let bidLimit = 5; // Initial limit
-    if (currentMaxBid >= 5) bidLimit = 10;
-    if (currentMaxBid >= 10) bidLimit = 15;
-    if (currentMaxBid >= 15) bidLimit = 20;
-    if (currentMaxBid >= 20) bidLimit = 25;
-    if (currentMaxBid >= 25) bidLimit = 30;
-    if (currentMaxBid >= 30) bidLimit = 35;
-    if (currentMaxBid >= 35) bidLimit = 40;
-    if (currentMaxBid >= 40) bidLimit = 45;
-    if (currentMaxBid >= 45) bidLimit = 50;
-    
-    if (bid > bidLimit) {
-      socket.emit('error', { message: `Bid limit is $${bidLimit}. Reach higher bid to unlock more.` });
-      return;
-    }
-    
-    gameState.playerBid = { bid, floor, direction };
+    gameState.playerBid = { bid };
     
     // Move to actions phase when bid is submitted (don't auto-start round)
     // Player can now select action and then click "START ROUND" button

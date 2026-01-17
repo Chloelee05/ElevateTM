@@ -30,18 +30,17 @@
         <div id="tutorialOverlay" class="tutorial-overlay">
             <div class="tutorial-content">
                 <h2>HOW TO PLAY</h2>
-                <p>Welcome to Elevate™ - where money buys priority!</p>
+                <p>Welcome to Elevate™ - Collect passengers to win!</p>
                 <ul>
-                    <li><strong>GOAL:</strong> Be the first to reach Floor 1! You start on a random floor (2-5)</li>
-                    <li><strong>AUCTION SYSTEM:</strong> Bid credits to call elevators. Higher bids override lower bids!</li>
-                    <li><strong>PLAYERS:</strong> 2 players (you + 1 AI bot) on floors 2-5, all want to reach Floor 1</li>
-                    <li><strong>BIDDING:</strong> Enter your bid amount and click "Place Bid". Higher bids take priority!</li>
-                    <li><strong>PREMIUM ACTIONS:</strong> Use strategically to gain advantages. More actions = longer gameplay!</li>
-                    <li><strong>AI BOTS:</strong> Watch the announcement board to see bot bids and actions</li>
+                    <li><strong>GOAL:</strong> Be the first to collect 20 passengers!</li>
+                    <li><strong>ELEVATOR:</strong> Each round, an elevator arrives with 1-5 random passengers</li>
+                    <li><strong>BIDDING:</strong> Bid credits to win the passengers. Higher bids win!</li>
+                    <li><strong>PLAYERS:</strong> 2 players (you + 1 AI bot) compete for passengers</li>
+                    <li><strong>SPECIAL ACTIONS:</strong> Use strategically to gain advantages or sabotage opponent!</li>
                     <li><strong>ROUND SYSTEM:</strong> Each round you submit 1 bid and 1 action, then round processes</li>
-                    <li><strong>END GAME:</strong> First to reach Floor 1 wins, or after maximum rounds</li>
+                    <li><strong>END GAME:</strong> First to 20 passengers wins, or highest after max rounds</li>
                 </ul>
-                <p class="goal-highlight">⚠️ Strategy: Balance bidding with premium actions to reach Floor 1 first!</p>
+                <p class="goal-highlight">⚠️ Strategy: Balance bidding with special actions to collect 20 passengers first!</p>
                 <p style="margin-top: 15px; text-align: center;">
                     <a href="details.html" style="color: #4ecdc4; text-decoration: underline; font-size: 0.8em;">Need more details?-></a>
                 </p>
@@ -80,23 +79,22 @@
                         <h3 id="userNickname">PLAYER</h3>
                         <div class="credits">
                             <span>CREDITS:</span>
-                            <span id="userCredits">$50</span>
+                            <span id="userCredits">$100</span>
                         </div>
-                        <div class="user-location">
-                            <span>FLOOR:</span>
-                            <span id="userFloor">1</span>
+                        <div class="info-item">
+                            <span class="info-label">PASSENGERS</span>
+                            <span id="userFloor">0</span>
+                        </div>
+                        <div id="elevatorInfo" style="margin-top: 10px; font-size: 0.6em; color: #9ca3af;">
+                            <span style="color: #ffd93d;">🚶 0 passengers</span> waiting
                         </div>
                     </div>
 
                     <div class="elevator-controls" id="bidPanel">
                         <h4>YOUR BID</h4>
                         <div class="bid-controls">
-                            <p style="font-size: 0.6em; margin-bottom: 10px; color: #ffd93d;">Goal: Reach Floor 1</p>
-                            <div class="elevator-buttons">
-                                <button class="elevator-button up-button" id="upButton" disabled>↑</button>
-                                <button class="elevator-button down-button" id="downButton">↓</button>
-                            </div>
-                            <div id="bidInputSection" class="hidden">
+                            <p style="font-size: 0.6em; margin-bottom: 10px; color: #ffd93d;">Goal: Collect 20 passengers first!</p>
+                            <div id="bidInputSection">
                                 <label>YOUR BID ($):</label>
                                 <br>
                                 <br>
@@ -109,7 +107,7 @@
                                 </div>
                                 <button id="submitBidButton" style="margin-top: 10px;">SUBMIT BID</button>
                             </div>
-                            <p style="font-size: 0.5em; margin-top: 10px; color: #9ca3af;">Select direction first!</p>
+                            <p style="font-size: 0.5em; margin-top: 10px; color: #9ca3af;">Higher bid wins the passengers!</p>
                         </div>
                     </div>
 
@@ -142,19 +140,19 @@
                     <div class="goal-panel">
                         <h4>🎯 GAME RULES</h4>
                         <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
-                            <strong>GOAL:</strong> Be the first to reach <span class="goal-highlight">Floor 1</span>!
+                            <strong>GOAL:</strong> Collect <span class="goal-highlight">20 passengers</span> first!
                         </p>
                         <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
-                            <strong>ROUND SYSTEM:</strong> Each round you can submit 1 bid and 1 action
+                            <strong>ELEVATOR:</strong> Each round, 1-5 random passengers arrive
                         </p>
                         <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
-                            <strong>BIDDING:</strong> Higher bids win! Bid credits to call elevators to your floor
+                            <strong>BIDDING:</strong> Higher bids win the passengers!
                         </p>
                         <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
-                            <strong>ACTIONS:</strong> Use special actions strategically to gain advantages
+                            <strong>ACTIONS:</strong> Use special actions to gain advantages or sabotage!
                         </p>
                         <p style="font-size: 0.6em; line-height: 1.8;">
-                            <strong>FLOORS:</strong> 5 floors total (2-5 start, 1 is goal)
+                            <strong>WIN:</strong> First to 20 passengers or most after max rounds
                         </p>
                     </div>
 
