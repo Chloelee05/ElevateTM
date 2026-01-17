@@ -1260,6 +1260,18 @@ header h1 {
     }
 }
 
+/* Warning pulse animation for maintenance alerts */
+@keyframes warningPulse {
+    0%, 100% { 
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 4px 15px rgba(255,107,107,0.4);
+    }
+    50% { 
+        transform: translateX(-50%) scale(1.02);
+        box-shadow: 0 4px 25px rgba(255,107,107,0.6);
+    }
+}
+
 /* Scrollbar styling for 8bit theme */
 ::-webkit-scrollbar {
     width: 12px;

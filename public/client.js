@@ -54,10 +54,6 @@ function initUI() {
     }
     document.getElementById('submitBidButton').addEventListener('click', submitBid);
     
-    const upButton = document.getElementById('upButton');
-    const downButton = document.getElementById('downButton');
-    if (upButton) upButton.addEventListener('click', () => selectDirection('up'));
-    if (downButton) downButton.addEventListener('click', () => selectDirection('down'));
     
     setTimeout(() => {
         const closeTutorialBtn = document.getElementById('closeTutorial');
@@ -137,29 +133,7 @@ function joinGame() {
     document.getElementById('tutorialOverlay').classList.add('hidden');
 }
 
-let selectedDirection = null;
-
-function selectDirection(direction) {
-    selectedDirection = direction;
-    const upButton = document.getElementById('upButton');
-    const downButton = document.getElementById('downButton');
-    const bidInputSection = document.getElementById('bidInputSection');
-    
-    if (upButton) upButton.disabled = true;
-    if (downButton) downButton.disabled = true;
-    
-    if (direction === 'up') {
-        if (upButton) upButton.classList.add('selected');
-        if (downButton) downButton.classList.remove('selected');
-    } else {
-        if (downButton) downButton.classList.add('selected');
-        if (upButton) upButton.classList.remove('selected');
-    }
-    
-    if (bidInputSection) {
-        bidInputSection.classList.remove('hidden');
-    }
-}
+let selectedDirection = null; // Kept for compatibility but not used in passenger collection mode
 
 function startRound() {
     if (!gameState) {
@@ -748,6 +722,9 @@ socket.on('joined', (data) => {
     document.getElementById('userNickname').textContent = 
         document.getElementById('nicknameInput').value;
     
+    // Initialize maintenance fee display
+    updateMaintenanceUI(gameState?.currentRound || 1);
+    
     updateUI();
 });
 
@@ -810,18 +787,11 @@ socket.on('roundStart', (data) => {
     showNotification(`Round ${data.round} started! Submit your bid and action.`);
     selectedBid = null;
     selectedAction = null;
-    // Reset direction selection
     selectedDirection = null;
-    const upButton = document.getElementById('upButton');
-    const downButton = document.getElementById('downButton');
-    if (upButton) {
-        upButton.disabled = false;
-        upButton.classList.remove('selected');
-    }
-    if (downButton) {
-        downButton.disabled = false;
-        downButton.classList.remove('selected');
-    }
+    
+    // Update maintenance fee display for new round
+    updateMaintenanceUI(data.round || gameState?.currentRound || 1);
+    
     // Reset bid input section - show it for new round
     const bidInputSection = document.getElementById('bidInputSection');
     if (bidInputSection) {
@@ -835,6 +805,132 @@ socket.on('roundStart', (data) => {
     }
     updateUI();
 });
+
+// Handle maintenance fee payment notification
+socket.on('maintenancePaid', (data) => {
+    console.log('Maintenance paid:', data);
+    
+    // Update current user credits after maintenance
+    if (currentUser) {
+        currentUser.credits = data.playerCreditsAfter;
+    }
+    
+    // Show maintenance notification
+    const feePaid = data.fee;
+    if (feePaid > 0) {
+        showNotification(`💸 Maintenance fee paid: $${feePaid}`, 'warning');
+    }
+    
+    // Update maintenance UI with outlook
+    if (data.outlook) {
+        updateMaintenanceUIWithOutlook(data.outlook);
+    }
+    
+    updateUI();
+});
+
+// Maintenance Fee Constants (must match server)
+const MAINTENANCE_ROUND_INTERVAL = 2;
+const MAINTENANCE_COST_INCREMENT = 5;
+
+// Calculate maintenance fee for a given round (client-side)
+function calculateMaintenanceFee(roundNum) {
+    const multiplier = Math.max(0, Math.floor((roundNum - 1) / MAINTENANCE_ROUND_INTERVAL));
+    return multiplier * MAINTENANCE_COST_INCREMENT;
+}
+
+// Update maintenance fee UI
+function updateMaintenanceUI(currentRound) {
+    const currentFee = calculateMaintenanceFee(currentRound);
+    const nextFee = calculateMaintenanceFee(currentRound + 1);
+    const fee2Rounds = calculateMaintenanceFee(currentRound + 2);
+    
+    const currentFeeEl = document.getElementById('currentMaintenanceFee');
+    const nextFeeEl = document.getElementById('nextMaintenanceFee');
+    const fee2RoundsEl = document.getElementById('maintenance2Rounds');
+    const maintenanceInfo = document.getElementById('maintenanceInfo');
+    
+    if (currentFeeEl) currentFeeEl.textContent = `$${currentFee}`;
+    if (nextFeeEl) nextFeeEl.textContent = `$${nextFee}`;
+    if (fee2RoundsEl) fee2RoundsEl.textContent = `$${fee2Rounds}`;
+    
+    // Highlight if fee is high (danger zone)
+    if (maintenanceInfo) {
+        if (currentFee >= 15) {
+            maintenanceInfo.style.borderColor = '#ff6b6b';
+            maintenanceInfo.style.background = 'rgba(255,107,107,0.25)';
+        } else if (currentFee >= 10) {
+            maintenanceInfo.style.borderColor = '#ffd93d';
+            maintenanceInfo.style.background = 'rgba(255,217,61,0.15)';
+        } else {
+            maintenanceInfo.style.borderColor = '#4ecdc4';
+            maintenanceInfo.style.background = 'rgba(78,205,196,0.1)';
+        }
+    }
+    
+    // Check if player can afford next round's maintenance
+    const playerCredits = currentUser?.credits || 0;
+    if (playerCredits < nextFee && nextFee > 0) {
+        showMaintenanceWarning(nextFee, playerCredits);
+    }
+}
+
+// Update maintenance UI with server-provided outlook
+function updateMaintenanceUIWithOutlook(outlook) {
+    const currentFeeEl = document.getElementById('currentMaintenanceFee');
+    const nextFeeEl = document.getElementById('nextMaintenanceFee');
+    const fee2RoundsEl = document.getElementById('maintenance2Rounds');
+    
+    if (currentFeeEl && outlook.current !== undefined) {
+        currentFeeEl.textContent = `$${outlook.current}`;
+    }
+    if (nextFeeEl && outlook.next_round !== undefined) {
+        nextFeeEl.textContent = `$${outlook.next_round}`;
+    }
+    if (fee2RoundsEl && outlook.in_2_rounds !== undefined) {
+        fee2RoundsEl.textContent = `$${outlook.in_2_rounds}`;
+    }
+}
+
+// Show maintenance warning if player might go bankrupt
+function showMaintenanceWarning(nextFee, currentCredits) {
+    const warningEl = document.createElement('div');
+    warningEl.id = 'maintenanceWarning';
+    warningEl.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #ff6b6b, #ff8e53);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 0.6em;
+        z-index: 9999;
+        animation: warningPulse 1s infinite;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(255,107,107,0.4);
+    `;
+    warningEl.innerHTML = `
+        ⚠️ WARNING: Next maintenance fee is $${nextFee}!<br>
+        You only have $${currentCredits}. Win or go bankrupt!
+    `;
+    
+    // Remove existing warning
+    const existing = document.getElementById('maintenanceWarning');
+    if (existing) existing.remove();
+    
+    // Only show if not already showing
+    document.body.appendChild(warningEl);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (warningEl.parentNode) {
+            warningEl.remove();
+        }
+    }, 5000);
+}
 
 socket.on('roundProcessing', (data) => {
     showNotification(`Round ${data.round} processing...`);
@@ -1102,9 +1198,335 @@ socket.on('roundResult', (data) => {
         }
     }
     
+    // Update round analysis sidebar
+    if (data.roundAnalysis) {
+        updateRoundAnalysisSidebar(data.round, data.roundAnalysis, data.aiReasons || []);
+    }
+    
     // Show passenger animation with action effects
     showPassengerAnimation(data.winner, data.passengersAwarded, data.playerTotal, data.botTotal, data.actionEffects || []);
 });
+
+// Round Analysis History
+let roundAnalysisHistory = [];
+
+// Update the round reports panel (under LIVE FEED)
+function updateRoundAnalysisSidebar(round, analysis, aiReasons) {
+    // Store analysis with enhanced data
+    const reportData = { 
+        round, 
+        analysis, 
+        aiReasons,
+        timestamp: new Date().toLocaleTimeString()
+    };
+    roundAnalysisHistory.push(reportData);
+    
+    // Get the round reports list container
+    const reportsList = document.getElementById('roundReportsList');
+    if (!reportsList) return;
+    
+    // Clear placeholder text if first report
+    if (roundAnalysisHistory.length === 1) {
+        reportsList.innerHTML = '';
+    }
+    
+    // Create report box
+    const reportBox = document.createElement('div');
+    reportBox.className = 'round-report-box';
+    reportBox.style.cssText = `
+        background: linear-gradient(135deg, ${getRiskColor(analysis.riskLevel)}22, transparent);
+        border: 2px solid ${getRiskColor(analysis.riskLevel)};
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    `;
+    
+    reportBox.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: ${getRiskColor(analysis.riskLevel)}; font-size: 1em;">${getRiskEmoji(analysis.riskLevel)}</span>
+            <span style="color: #ffd93d; font-size: 0.55em; font-weight: bold;">ROUND ${round}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: ${getRiskColor(analysis.riskLevel)}; font-size: 0.45em; text-transform: uppercase;">${analysis.riskLevel}</span>
+            <span style="color: #6b7280; font-size: 0.9em;">▶</span>
+        </div>
+    `;
+    
+    // Hover effects
+    reportBox.addEventListener('mouseenter', () => {
+        reportBox.style.transform = 'translateX(3px)';
+        reportBox.style.boxShadow = `0 0 10px ${getRiskColor(analysis.riskLevel)}44`;
+    });
+    reportBox.addEventListener('mouseleave', () => {
+        reportBox.style.transform = 'translateX(0)';
+        reportBox.style.boxShadow = 'none';
+    });
+    
+    // Click to show detailed popup
+    reportBox.addEventListener('click', () => {
+        showRoundReportPopup(reportData);
+    });
+    
+    // Prepend (newest first)
+    reportsList.insertBefore(reportBox, reportsList.firstChild);
+    
+    // Keep only last 10 visible
+    while (reportsList.children.length > 10) {
+        reportsList.removeChild(reportsList.lastChild);
+    }
+}
+
+// Show detailed round report popup
+function showRoundReportPopup(reportData) {
+    // Remove existing popup
+    const existingPopup = document.getElementById('roundReportPopup');
+    if (existingPopup) existingPopup.remove();
+    
+    const { round, analysis, aiReasons, timestamp } = reportData;
+    
+    const popup = document.createElement('div');
+    popup.id = 'roundReportPopup';
+    popup.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 4px solid ${getRiskColor(analysis.riskLevel)};
+        border-radius: 15px;
+        padding: 25px;
+        z-index: 10001;
+        max-width: 550px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        font-family: 'Press Start 2P', cursive;
+        box-shadow: 0 0 40px ${getRiskColor(analysis.riskLevel)}66, 0 0 80px rgba(0,0,0,0.8);
+        animation: popupSlideIn 0.3s ease;
+    `;
+    
+    // Add animation keyframes
+    const style = document.createElement('style');
+    style.id = 'popupAnimStyle';
+    style.textContent = `
+        @keyframes popupSlideIn {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+            100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Parse AI reasoning for enhanced display
+    const aiAnalysis = parseAIReasons(aiReasons);
+    
+    popup.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div>
+                <h2 style="color: ${getRiskColor(analysis.riskLevel)}; font-size: 1em; margin: 0;">
+                    ${getRiskEmoji(analysis.riskLevel)} ROUND ${round} REPORT
+                </h2>
+                <div style="color: #6b7280; font-size: 0.5em; margin-top: 5px;">${timestamp}</div>
+            </div>
+            <button id="closeReportPopup" style="
+                background: #ff6b6b;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                width: 30px;
+                height: 30px;
+                cursor: pointer;
+                font-size: 0.8em;
+                font-family: inherit;
+            ">✕</button>
+        </div>
+        
+        <!-- Player Profile Section -->
+        <div style="background: rgba(0,0,0,0.3); border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+            <div style="color: #ffd93d; font-size: 0.6em; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px;">
+                👤 YOUR PROFILE
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div style="background: ${getRiskColor(analysis.riskLevel)}22; padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="color: #9ca3af; font-size: 0.45em; margin-bottom: 5px;">PLAY STYLE</div>
+                    <div style="color: ${getRiskColor(analysis.riskLevel)}; font-size: 0.7em; font-weight: bold;">
+                        ${analysis.riskLevel.toUpperCase()}
+                    </div>
+                </div>
+                <div style="background: rgba(255,217,61,0.1); padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="color: #9ca3af; font-size: 0.45em; margin-bottom: 5px;">BID AGGRESSION</div>
+                    <div style="color: #ffd93d; font-size: 0.7em; font-weight: bold;">${analysis.bidAggressiveness}%</div>
+                </div>
+                <div style="background: rgba(78,205,196,0.1); padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="color: #9ca3af; font-size: 0.45em; margin-bottom: 5px;">WIN RATE</div>
+                    <div style="color: #4ecdc4; font-size: 0.7em; font-weight: bold;">${analysis.winRate || 0}%</div>
+                </div>
+                <div style="background: rgba(167,139,250,0.1); padding: 10px; border-radius: 8px; text-align: center;">
+                    <div style="color: #9ca3af; font-size: 0.45em; margin-bottom: 5px;">TREND</div>
+                    <div style="color: #a78bfa; font-size: 0.6em; font-weight: bold;">${getTrendEmoji(analysis.trend)} ${analysis.trend}</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Insight Section -->
+        <div style="background: rgba(78,205,196,0.1); border-left: 3px solid #4ecdc4; padding: 12px; margin-bottom: 15px; border-radius: 0 8px 8px 0;">
+            <div style="color: #4ecdc4; font-size: 0.5em; margin-bottom: 5px;">💡 INSIGHT</div>
+            <div style="color: white; font-size: 0.55em; line-height: 1.6;">${analysis.insight}</div>
+        </div>
+        
+        <!-- AI Analysis Section -->
+        <div style="background: rgba(255,107,107,0.1); border-radius: 10px; padding: 15px;">
+            <div style="color: #ff6b6b; font-size: 0.6em; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px;">
+                🤖 AI BOT ANALYSIS
+            </div>
+            
+            ${aiAnalysis.intent ? `
+            <div style="margin-bottom: 12px;">
+                <div style="color: #ffd93d; font-size: 0.5em; margin-bottom: 5px;">🎯 AI Intent</div>
+                <div style="color: white; font-size: 0.55em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px;">
+                    ${aiAnalysis.intent}
+                </div>
+            </div>
+            ` : ''}
+            
+            ${aiAnalysis.opponentRead ? `
+            <div style="margin-bottom: 12px;">
+                <div style="color: #ffd93d; font-size: 0.5em; margin-bottom: 5px;">🔍 Opponent Analysis</div>
+                <div style="color: white; font-size: 0.55em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px;">
+                    ${aiAnalysis.opponentRead}
+                </div>
+            </div>
+            ` : ''}
+            
+            ${aiAnalysis.forecast ? `
+            <div style="margin-bottom: 12px;">
+                <div style="color: #ffd93d; font-size: 0.5em; margin-bottom: 5px;">📈 Bid Forecast</div>
+                <div style="color: white; font-size: 0.55em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px;">
+                    ${aiAnalysis.forecast}
+                </div>
+            </div>
+            ` : ''}
+            
+            ${aiAnalysis.strategy.length > 0 ? `
+            <div style="margin-bottom: 12px;">
+                <div style="color: #ffd93d; font-size: 0.5em; margin-bottom: 5px;">⚡ Strategy Notes</div>
+                <div style="color: #9ca3af; font-size: 0.5em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px; line-height: 1.8;">
+                    ${aiAnalysis.strategy.map(s => `• ${s}`).join('<br>')}
+                </div>
+            </div>
+            ` : ''}
+            
+            ${aiAnalysis.finalBid ? `
+            <div style="background: linear-gradient(135deg, #ff6b6b22, #ffd93d22); padding: 10px; border-radius: 8px; text-align: center;">
+                <div style="color: #9ca3af; font-size: 0.45em; margin-bottom: 5px;">FINAL DECISION</div>
+                <div style="color: #ff6b6b; font-size: 0.6em; font-weight: bold;">${aiAnalysis.finalBid}</div>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Add backdrop
+    const backdrop = document.createElement('div');
+    backdrop.id = 'roundReportBackdrop';
+    backdrop.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        z-index: 10000;
+    `;
+    backdrop.addEventListener('click', closeRoundReportPopup);
+    
+    document.body.appendChild(backdrop);
+    document.body.appendChild(popup);
+    
+    // Close button handler
+    document.getElementById('closeReportPopup').addEventListener('click', closeRoundReportPopup);
+}
+
+// Parse AI reasons into structured data
+function parseAIReasons(aiReasons) {
+    if (!aiReasons || aiReasons.length === 0) {
+        return { intent: '', opponentRead: '', forecast: '', strategy: [], finalBid: '' };
+    }
+    
+    const result = {
+        intent: '',
+        opponentRead: '',
+        forecast: '',
+        strategy: [],
+        finalBid: ''
+    };
+    
+    aiReasons.forEach(reason => {
+        if (reason.includes('Intent:') || reason.includes('Personality:')) {
+            result.intent = reason
+                .replace('Intent:', '<strong>Intent:</strong>')
+                .replace('Personality:', '<strong>Personality:</strong>');
+        } else if (reason.includes('Opponent read:') || reason.includes('opponent')) {
+            result.opponentRead = reason
+                .replace('Opponent read:', '<strong>Opponent read:</strong>')
+                .replace(/aggr=([0-9.]+)/g, '<span style="color:#ff6b6b">Aggression: $1</span>')
+                .replace(/tilt=([0-9.]+)/g, '<span style="color:#ffd93d">Tilt: $1</span>')
+                .replace(/vol=([0-9.]+)/g, '<span style="color:#4ecdc4">Volatility: $1</span>');
+        } else if (reason.includes('Forecast') || reason.includes('q25/q50/q75')) {
+            result.forecast = reason
+                .replace(/q25\/q50\/q75:/g, '<strong>Quartiles (25/50/75):</strong>')
+                .replace(/opp money=(\d+)/g, '<span style="color:#4ecdc4">Opponent Money: $$$1</span>');
+        } else if (reason.includes('LLM range') || reason.includes('final bid')) {
+            result.finalBid = reason
+                .replace(/\$(\d+)/g, '<span style="color:#ffd93d;font-size:1.2em">$$$1</span>')
+                .replace(/intent=(\w+)/g, '<span style="color:#a78bfa">Intent: $1</span>');
+        } else if (reason.includes('Guardrail') || reason.includes('reserved')) {
+            result.strategy.push(reason
+                .replace(/\$(\d+)/g, '<span style="color:#4ecdc4">$$$1</span>'));
+        } else if (reason.length > 5) {
+            result.strategy.push(reason);
+        }
+    });
+    
+    return result;
+}
+
+// Close round report popup
+function closeRoundReportPopup() {
+    const popup = document.getElementById('roundReportPopup');
+    const backdrop = document.getElementById('roundReportBackdrop');
+    const style = document.getElementById('popupAnimStyle');
+    
+    if (popup) popup.remove();
+    if (backdrop) backdrop.remove();
+    if (style) style.remove();
+}
+
+// Helper functions
+function getRiskColor(riskLevel) {
+    switch (riskLevel) {
+        case 'aggressive': return '#ff6b6b';
+        case 'conservative': return '#4ecdc4';
+        default: return '#ffd93d';
+    }
+}
+
+function getRiskEmoji(riskLevel) {
+    switch (riskLevel) {
+        case 'aggressive': return '🔥';
+        case 'conservative': return '🛡️';
+        default: return '⚖️';
+    }
+}
+
+function getTrendEmoji(trend) {
+    if (trend.includes('increas') || trend.includes('up')) return '📈';
+    if (trend.includes('decreas') || trend.includes('down')) return '📉';
+    return '➡️';
+}
 
 // Passenger transfer animation - BIGGER and SLOWER
 function showPassengerAnimation(winner, passengersAwarded, playerTotal, botTotal, actionEffects = []) {
@@ -1438,22 +1860,135 @@ socket.on('roundEnd', (data) => {
 });
 
 socket.on('gameEnd', (data) => {
-    const gameScreen = document.getElementById('gameScreen');
-    const collapseScreen = document.getElementById('collapseScreen');
+    console.log('Game ended:', data);
     
-    if (gameScreen) {
-        gameScreen.classList.add('hidden');
-        gameScreen.style.display = 'none';
-    }
+    // Close any open report popup
+    closeRoundReportPopup();
     
-    if (collapseScreen) {
-        collapseScreen.classList.remove('hidden');
-        collapseScreen.style.display = 'block';
-        document.getElementById('collapseReason').textContent = data.reason || '🎉 GAME END! 🎉';
-        document.getElementById('finalDisruptionScore').textContent = gameState?.disruptionScore || 0;
-        document.getElementById('finalInstability').textContent = `Round ${data.round || 0}`;
-    }
+    // Show final report modal instead of collapse screen
+    showFinalReportModal(data);
 });
+
+// Show the final report modal
+function showFinalReportModal(data) {
+    // Remove existing modal
+    const existingModal = document.getElementById('finalReportModal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'finalReportModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        font-family: 'Press Start 2P', cursive;
+    `;
+    
+    const isWinner = data.winner === currentUser?.nickname || data.playerPassengers > data.botPassengers;
+    
+    modal.innerHTML = `
+        <div style="
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 5px solid ${isWinner ? '#4ade80' : '#ff6b6b'};
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            color: white;
+            text-align: center;
+        ">
+            <h1 style="
+                color: ${isWinner ? '#4ade80' : '#ff6b6b'};
+                font-size: 1.5em;
+                margin-bottom: 20px;
+                text-shadow: 3px 3px 0px #000;
+            ">
+                ${isWinner ? '🏆 VICTORY! 🏆' : '😢 DEFEAT'}
+            </h1>
+            
+            <div style="
+                color: #ffd93d;
+                font-size: 0.8em;
+                margin-bottom: 20px;
+            ">
+                ${data.reason}
+            </div>
+            
+            <div style="
+                display: flex;
+                justify-content: center;
+                gap: 40px;
+                margin-bottom: 30px;
+            ">
+                <div style="text-align: center;">
+                    <div style="font-size: 40px;">🧑</div>
+                    <div style="color: #4ade80; font-size: 0.7em;">YOU</div>
+                    <div style="font-size: 1.2em; margin-top: 5px;">🚶 ${data.playerPassengers || 0}</div>
+                </div>
+                <div style="font-size: 1.5em; color: #ffd93d; align-self: center;">VS</div>
+                <div style="text-align: center;">
+                    <div style="font-size: 40px;">🤖</div>
+                    <div style="color: #ff6b6b; font-size: 0.7em;">AI BOT</div>
+                    <div style="font-size: 1.2em; margin-top: 5px;">🚶 ${data.botPassengers || 0}</div>
+                </div>
+            </div>
+            
+            ${data.finalReport ? `
+                <div style="
+                    background: rgba(0, 0, 0, 0.5);
+                    border: 2px solid #ffd93d;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    text-align: left;
+                    font-size: 0.5em;
+                    line-height: 1.8;
+                    white-space: pre-wrap;
+                    font-family: monospace;
+                    max-height: 300px;
+                    overflow-y: auto;
+                ">
+                    ${escapeHtml(data.finalReport)}
+                </div>
+            ` : ''}
+            
+            <button onclick="location.reload()" style="
+                background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+                color: white;
+                border: 3px solid #000;
+                padding: 15px 30px;
+                font-family: 'Press Start 2P', cursive;
+                font-size: 0.8em;
+                cursor: pointer;
+                border-radius: 5px;
+                box-shadow: 4px 4px 0px #000;
+            ">
+                PLAY AGAIN
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// Helper to escape HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 
 socket.on('error', (data) => {
     showNotification(data.message, 'error');

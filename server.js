@@ -3,6 +3,9 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 
+// AI Agent Adapter - LangChain integration
+const agentAdapter = require('./agent-adapter');
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -61,8 +64,65 @@ const gameState = {
   totalActions: 0,
   announcements: [],
   maxBidReached: 0,
-  roundResults: [] // History of round results
+  roundResults: [], // History of round results
+  roundHistory: [], // Detailed history for AI analysis and reporting
+  aiReasons: [], // AI decision reasoning for display
+  maintenanceFee: 0, // Current round's maintenance fee
+  maintenanceHistory: [] // Track maintenance fees paid each round
 };
+
+// Maintenance Fee Constants
+const MAINTENANCE_ROUND_INTERVAL = 2; // Fee increases every 2 rounds
+const MAINTENANCE_COST_INCREMENT = 5; // Fee increases by $5 each interval
+
+// Calculate maintenance fee for a given round
+function calculateMaintenanceFee(roundNum) {
+  const multiplier = Math.max(0, Math.floor((roundNum - 1) / MAINTENANCE_ROUND_INTERVAL));
+  return multiplier * MAINTENANCE_COST_INCREMENT;
+}
+
+// Calculate maintenance outlook for upcoming rounds
+function getMaintenanceOutlook(currentRound) {
+  return {
+    current: calculateMaintenanceFee(currentRound),
+    next_round: calculateMaintenanceFee(currentRound + 1),
+    in_2_rounds: calculateMaintenanceFee(currentRound + 2),
+    in_3_rounds: calculateMaintenanceFee(currentRound + 3)
+  };
+}
+
+// Apply maintenance fee to both players at round start
+// Returns: { success: boolean, playerBankrupt: boolean, botBankrupt: boolean }
+function applyMaintenanceFee() {
+  const fee = gameState.maintenanceFee;
+  const playerCredits = gameState.player?.credits || 0;
+  const botCredits = gameState.bot?.credits || 0;
+  
+  const playerCanPay = playerCredits >= fee;
+  const botCanPay = botCredits >= fee;
+  
+  if (playerCanPay && botCanPay) {
+    // Both can pay - deduct fee
+    gameState.player.credits -= fee;
+    gameState.bot.credits -= fee;
+    
+    // Track maintenance history
+    gameState.maintenanceHistory.push({
+      round: gameState.currentRound,
+      fee: fee,
+      playerPaid: fee,
+      botPaid: fee
+    });
+    
+    return { success: true, playerBankrupt: false, botBankrupt: false };
+  }
+  
+  return { 
+    success: false, 
+    playerBankrupt: !playerCanPay, 
+    botBankrupt: !botCanPay 
+  };
+}
 
 // Penalty tracking
 const penalties = {
@@ -385,37 +445,47 @@ function prepareDataForAIAgent() {
 // This function prepares JSON data and sends to AI agent API
 async function callAIAgent() {
   try {
-    const requestData = prepareDataForAIAgent();
+    console.log('Calling AI Agent via LangChain pipeline...');
     
-    // TODO: Uncomment and configure when Moe/Jason's AI agent API is ready
-    // The AI agent should receive the JSON data and return a decision
-    // Expected response format: { bid: number | null, action: string | null }
+    // Pass player's bid to help AI make better decisions
+    const playerBid = gameState.playerBid?.bid || 0;
     
-    // const response = await fetch(AI_AGENT_API_URL, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify(requestData)
-    // });
-    // 
-    // if (!response.ok) {
-    //   throw new Error(`AI Agent API error: ${response.status}`);
-    // }
-    // 
-    // const aiDecision = await response.json();
-    // 
-    // // Validate response format
-    // if (aiDecision.bid !== undefined && aiDecision.action !== undefined) {
-    //   return { bid: aiDecision.bid, action: aiDecision.action };
-    // } else {
-    //   throw new Error('Invalid AI agent response format');
-    // }
+    // Use the agent adapter to get AI decision (now with player bid and auto personality)
+    const result = await agentAdapter.getAIBid(gameState, playerBid, null);
     
-    // Temporary: Use simple bot logic until AI agent is ready
-    console.log('Calling AI Agent (temporary: using simple bot logic)');
-    console.log('Request data:', JSON.stringify(requestData, null, 2));
-    return makeSimpleBotDecision();
+    console.log('AI Agent decision:', { 
+      bid: result.bid, 
+      action: result.action,
+      personality: result.personality 
+    });
+    console.log('AI Reasoning:', result.reasons);
+    
+    // Store AI reasons and personality for display
+    gameState.aiReasons = result.reasons || [];
+    gameState.aiPersonality = result.personality || 'neutral';
+    
+    // Check for API-detected game over (bankruptcy from maintenance)
+    if (result.gameOver && result.gameOverReason) {
+      console.log('API detected game over condition:', result.gameOverReason);
+      gameState.apiGameOver = {
+        detected: true,
+        reason: result.gameOverReason
+      };
+    }
+    
+    // Sync state from API if available (for maintenance consistency)
+    if (result.apiState) {
+      // Only sync specific fields to avoid overwriting special actions logic
+      if (result.apiState.maintenance_fee_current !== undefined) {
+        gameState.maintenanceFee = result.apiState.maintenance_fee_current;
+      }
+    }
+    
+    return { 
+      bid: result.bid, 
+      action: result.action,
+      personality: result.personality
+    };
   } catch (error) {
     console.error('Error calling AI agent:', error);
     // Fallback to simple bot logic
@@ -465,12 +535,83 @@ async function processRound() {
   
   console.log(`Processing Round ${gameState.currentRound}...`);
   
+  // Calculate and apply maintenance fee at round start
+  gameState.maintenanceFee = calculateMaintenanceFee(gameState.currentRound);
+  const maintenanceOutlook = getMaintenanceOutlook(gameState.currentRound);
+  
+  console.log(`Round ${gameState.currentRound} - Maintenance Fee: $${gameState.maintenanceFee}`);
+  
+  // Store credits before maintenance for tracking
+  const playerCreditsBeforeMaintenance = gameState.player?.credits || 0;
+  const botCreditsBeforeMaintenance = gameState.bot?.credits || 0;
+  
+  // Apply maintenance fee
+  const maintenanceResult = applyMaintenanceFee();
+  
+  // Check for bankruptcy (walkover)
+  if (!maintenanceResult.success) {
+    console.log('Maintenance fee bankruptcy detected!');
+    
+    let winner, loser, reason;
+    
+    if (maintenanceResult.playerBankrupt && maintenanceResult.botBankrupt) {
+      // Both bankrupt - tie based on passengers
+      const playerPassengers = gameState.player?.passengers || 0;
+      const botPassengers = gameState.bot?.passengers || 0;
+      
+      if (playerPassengers > botPassengers) {
+        winner = gameState.player.nickname;
+        reason = `Both players bankrupt! ${winner} wins with more passengers (${playerPassengers} vs ${botPassengers})`;
+      } else if (botPassengers > playerPassengers) {
+        winner = gameState.bot.nickname;
+        reason = `Both players bankrupt! ${winner} wins with more passengers (${botPassengers} vs ${playerPassengers})`;
+      } else {
+        winner = 'TIE';
+        reason = `Both players bankrupt with equal passengers (${playerPassengers})! It's a tie!`;
+      }
+    } else if (maintenanceResult.playerBankrupt) {
+      winner = gameState.bot.nickname;
+      loser = gameState.player.nickname;
+      reason = `💸 ${loser} couldn't afford maintenance fee ($${gameState.maintenanceFee})! ${winner} wins by walkover!`;
+    } else {
+      winner = gameState.player.nickname;
+      loser = gameState.bot.nickname;
+      reason = `💸 ${loser} couldn't afford maintenance fee ($${gameState.maintenanceFee})! ${winner} wins by walkover!`;
+    }
+    
+    gameState.systemCollapsed = true;
+    io.emit('gameEnd', {
+      winner: winner,
+      reason: reason,
+      round: gameState.currentRound,
+      maintenanceBankruptcy: true,
+      playerPassengers: gameState.player?.passengers || 0,
+      botPassengers: gameState.bot?.passengers || 0
+    });
+    return;
+  }
+  
+  console.log(`Maintenance paid: Player $${playerCreditsBeforeMaintenance} -> $${gameState.player.credits}, Bot $${botCreditsBeforeMaintenance} -> $${gameState.bot.credits}`);
+  
+  // Emit maintenance fee info to clients
+  io.emit('maintenancePaid', {
+    round: gameState.currentRound,
+    fee: gameState.maintenanceFee,
+    playerCreditsBefore: playerCreditsBeforeMaintenance,
+    playerCreditsAfter: gameState.player.credits,
+    botCreditsBefore: botCreditsBeforeMaintenance,
+    botCreditsAfter: gameState.bot.credits,
+    outlook: maintenanceOutlook
+  });
+  
   // Initialize action states for this round
   gameState.actionStates = { player: {}, bot: {} };
   
   // Emit processing state
   io.emit('roundProcessing', {
     round: gameState.currentRound,
+    maintenanceFee: gameState.maintenanceFee,
+    maintenanceOutlook: maintenanceOutlook,
     gameState: getPublicGameState()
   });
   
@@ -542,7 +683,33 @@ async function processRound() {
   // Emit state after execution
   io.emit('gameState', getPublicGameState());
   
-  // Emit round result with action effects
+  // Track round history for AI analysis and reporting
+  const lastMaintenance = gameState.maintenanceHistory[gameState.maintenanceHistory.length - 1];
+  const roundHistoryEntry = {
+    round: gameState.currentRound,
+    playerBid: gameState.playerBid?.bid || 0,
+    botBid: gameState.botBid?.bid || 0,
+    playerAction: gameState.playerAction,
+    botAction: gameState.botAction,
+    winner: roundResult.winner,
+    passengersAwarded: roundResult.passengersAwarded,
+    maintenanceFee: gameState.maintenanceFee,
+    playerCreditsBefore: (gameState.player?.credits || 0) + (gameState.playerBid?.bid || 0) + (lastMaintenance?.fee || 0),
+    playerCreditsAfterMaintenance: (gameState.player?.credits || 0) + (gameState.playerBid?.bid || 0),
+    playerCreditsAfter: gameState.player?.credits || 0,
+    botCreditsBefore: (gameState.bot?.credits || 0) + (gameState.botBid?.bid || 0) + (lastMaintenance?.fee || 0),
+    botCreditsAfterMaintenance: (gameState.bot?.credits || 0) + (gameState.botBid?.bid || 0),
+    botCreditsAfter: gameState.bot?.credits || 0,
+    playerPassengers: gameState.player?.passengers || 0,
+    botPassengers: gameState.bot?.passengers || 0,
+    aiReasons: gameState.aiReasons || []
+  };
+  gameState.roundHistory.push(roundHistoryEntry);
+  
+  // Generate round analysis
+  const roundAnalysisData = agentAdapter.generateRoundAnalysis(gameState, roundHistoryEntry);
+  
+  // Emit round result with action effects and analysis
   io.emit('roundResult', {
     round: gameState.currentRound,
     winner: roundResult.winner,
@@ -550,6 +717,8 @@ async function processRound() {
     playerTotal: gameState.player?.passengers || 0,
     botTotal: gameState.bot?.passengers || 0,
     actionEffects: roundResult.actionEffects || [],
+    roundAnalysis: roundAnalysisData,
+    aiReasons: gameState.aiReasons || [],
     gameState: getPublicGameState()
   });
   
@@ -560,7 +729,7 @@ async function processRound() {
   generateElevatorPassengers();
   
   // Check for win conditions
-  const gameEnded = checkWinConditions();
+  const gameEnded = await checkWinConditions();
   
   if (!gameEnded) {
     // End round only if game hasn't ended
@@ -1116,40 +1285,56 @@ async function processElevatorMovement() {
 }
 
 // Check win conditions
-function checkWinConditions() {
+async function checkWinConditions() {
   const playerPassengers = gameState.player?.passengers || 0;
   const botPassengers = gameState.bot?.passengers || 0;
   const goal = gameState.goalPassengers;
   
-  // Check if player reached goal
-  if (playerPassengers >= goal) {
+  // Helper function to emit game end with report
+  const emitGameEnd = async (winnerNickname, reason) => {
     gameState.systemCollapsed = true;
+    
+    // Generate final report
+    let finalReport = null;
+    try {
+      finalReport = await agentAdapter.generateFinalReport(gameState);
+      console.log('Final report generated successfully');
+    } catch (error) {
+      console.error('Failed to generate final report:', error);
+      finalReport = 'Report generation failed. Please try again.';
+    }
+    
     io.emit('gameEnd', {
-      winner: gameState.player.nickname,
-      reason: `🎉 YOU COLLECTED ${playerPassengers} PASSENGERS! YOU WIN! 🎉`,
+      winner: winnerNickname,
+      reason: reason,
       round: gameState.currentRound,
       playerPassengers: playerPassengers,
-      botPassengers: botPassengers
+      botPassengers: botPassengers,
+      finalReport: finalReport,
+      roundHistory: gameState.roundHistory
     });
+  };
+  
+  // Check if player reached goal
+  if (playerPassengers >= goal) {
+    await emitGameEnd(
+      gameState.player.nickname,
+      `🎉 YOU COLLECTED ${playerPassengers} PASSENGERS! YOU WIN! 🎉`
+    );
     return true;
   }
   
   // Check if bot reached goal
   if (botPassengers >= goal) {
-    gameState.systemCollapsed = true;
-    io.emit('gameEnd', {
-      winner: gameState.bot.nickname,
-      reason: `AI Bot collected ${botPassengers} passengers! You lost!`,
-      round: gameState.currentRound,
-      playerPassengers: playerPassengers,
-      botPassengers: botPassengers
-    });
+    await emitGameEnd(
+      gameState.bot.nickname,
+      `AI Bot collected ${botPassengers} passengers! You lost!`
+    );
     return true;
   }
   
   // Check if max rounds reached
   if (gameState.currentRound >= gameState.maxRounds) {
-    gameState.systemCollapsed = true;
     const winner = playerPassengers > botPassengers ? 
       gameState.player.nickname : 
       (botPassengers > playerPassengers ? gameState.bot.nickname : 'Tie');
@@ -1158,13 +1343,7 @@ function checkWinConditions() {
       (botPassengers > playerPassengers ? 
         `AI Bot wins! ${botPassengers} vs ${playerPassengers} passengers!` :
         `It's a tie! Both have ${playerPassengers} passengers!`);
-    io.emit('gameEnd', {
-      winner: winner,
-      reason: reason,
-      round: gameState.currentRound,
-      playerPassengers: playerPassengers,
-      botPassengers: botPassengers
-    });
+    await emitGameEnd(winner, reason);
     return true;
   }
   
@@ -1216,6 +1395,8 @@ function endRound() {
 
 function getPublicGameState() {
   const elevator = gameState.elevators[0];
+  const maintenanceOutlook = getMaintenanceOutlook(gameState.currentRound);
+  
   return {
     player: gameState.player ? {
       id: gameState.player.id,
@@ -1248,7 +1429,10 @@ function getPublicGameState() {
     playerBid: gameState.playerBid,
     playerAction: gameState.playerAction,
     announcements: gameState.announcements.slice(0, 3),
-    maxBidReached: gameState.maxBidReached
+    maxBidReached: gameState.maxBidReached,
+    // Maintenance fee info
+    maintenanceFee: gameState.maintenanceFee,
+    maintenanceOutlook: maintenanceOutlook
   };
 }
 
@@ -1304,7 +1488,11 @@ io.on('connection', (socket) => {
       gameState.announcements = [];
       gameState.maxBidReached = 0;
       gameState.roundResults = [];
+      gameState.roundHistory = [];
+      gameState.aiReasons = [];
       gameState.actionStates = {};
+      gameState.maintenanceFee = 0;
+      gameState.maintenanceHistory = [];
       if (gameState.autoProcessTimeout) {
         clearTimeout(gameState.autoProcessTimeout);
         gameState.autoProcessTimeout = null;
