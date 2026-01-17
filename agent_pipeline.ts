@@ -294,13 +294,74 @@ export async function chooseBid(
   
   Include exactly these sections/labels:
   
-  Your Capital Profile
-  Risk Posture: <descriptor> (what this captures)
-  Capital Efficiency: <descriptor> ($X / point) (how cost per point reflects efficiency)
-  Emotional Discipline: <descriptor> (tilt/impulse control)
-  Liquidity Management: <descriptor> (cash preservation vs depletion)
-  Adaptability: <descriptor> (response to opponent shifts)
-  
+  Your Capital Profile:
+  Risk Posture: <descriptor>
+  Capital Efficiency: <descriptor>
+  Emotional Discipline: <descriptor>
+  Liquidity Management: <descriptor>
+  Adaptability: <descriptor>
+
+  description of each category includes:
+    Risk Posture (How risky is this strategy)
+      Levels
+        Conservative Preserver
+        Measured Allocator
+        Aggressive Deployer
+        All-In Opportunist
+      Descriptions
+        Conservative Preserver - Bids a small fraction of capital, prioritizing survival and optionality
+        Measured Allocator - Risks capital proportionally, balancing control and flexibility
+        Aggressive Deployer - Commits large portions of capital to secure wins
+        All-In Opportunist - Frequently risks outsized amounts, accepting bankruptcy risk
+
+    Capital Efficiency (how much is paid per successful outcome, take total amount bid / total points earned to get $/point)
+      Levels
+        Highly Efficient
+        Fair Value Payer
+        Overpayer
+        Capital Burner
+      Descriptions
+        Highly Efficient - Consistently wins with minimal excess spending
+        Fair Value Payer - Pays a reasonable premium for results
+        Overpayer - Regularly spends more than necessary to win
+        Capital Burner - Converts large capital outlays into limited results
+
+    Emotional Discipline (reaction to losses and pressure, tilt/impulse control)
+      Levels
+        Unshakeable
+        Composed
+        Reactive
+        Tilt-Prone
+      Descriptions
+        Unshakeable - Maintains stable behavior regardless of outcome
+        Composed - Minor adjustments, but avoids emotional swings
+        Reactive - Noticeable bid increases after losses
+        Tilt-Prone - Strong post-loss escalation and revenge bidding
+
+    Liquidity Management (liquidity should be used to gain points)
+      Levels
+        Liquidity Guardian
+        Buffer Aware
+        Thin Ice
+        Bankruptcy Dancer
+      Descriptions
+        Liquidity Guardian - Maintains a strong capital buffer throughout
+        Buffer Aware - Occasionally dips but avoids danger
+        Thin Ice - Frequently operates near critical capital levels
+        Bankruptcy Dancer - Regularly risks running out of money
+
+    Adaptability (ability to change strategy over time according to opponent moves)
+      Levels
+        Rigid Executor
+        Delayed Adapter
+        Situational Adapter
+        Highly Adaptive
+      Descriptions
+        Rigid Executor - Sticks to one strategy regardless of outcomes
+        Delayed Adapter - Changes behavior only after sustained losses
+        Situational Adapter - Adjusts strategy based on game context
+        Highly Adaptive - Proactively shifts approach as conditions change
+
   Overall Archetype:
   <archetype name>
   

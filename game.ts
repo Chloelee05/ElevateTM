@@ -1,22 +1,18 @@
-import { start } from "node:repl";
-import { callbackify } from "node:util";
+import { buildPipeline, chooseBid, generateReport, type GraphLike } from "./agent_pipeline.ts"
 import readlineSync from "readline-sync";
-import { buildPipeline, chooseBid, generateReport } from "./agent_pipeline.ts"
-import { number } from "zod";
-import build from "next/dist/build/index.js";
 
 
 console.log("test")
 
 // Constants
-const STARTING_AMT: number = 100;
+export const STARTING_AMT: number = 100;
 const MAINTENANCE_ROUND_INTERVAL: number = 2
 const MAINTENANCE_COST_INCREMENT: number = 5
 
 
 
 // Defining classes 
-class PlayerState {
+export class PlayerState {
   name: string;
   money: number;
   score: number;
@@ -28,7 +24,7 @@ class PlayerState {
   }
 }
 
-class RoundRecord {
+export class RoundRecord {
   round: number;
   player_bid: number;
   ai_bid: number;
@@ -81,7 +77,7 @@ class RoundRecord {
 }
 
 
-class GameState {
+export class GameState {
   starting_money: number;
   current_round: number;
   maintenance_fee_current: number;
@@ -361,7 +357,163 @@ export function build_report_context(state: GameState) {
 }
 
 
+export function create_initial_state(): GameState {
+    return new GameState(
+        STARTING_AMT,
+        1,
+        0,
+        new PlayerState("PLAYER", STARTING_AMT),
+        new PlayerState("AI", STARTING_AMT),
+        []
+    );
+}
 
+export function hydrate_state(raw: any): GameState {
+    const player = new PlayerState(
+        raw.player?.name ?? "PLAYER",
+        Number(raw.player?.money ?? STARTING_AMT),
+        Number(raw.player?.score ?? 0),
+    );
+    const ai = new PlayerState(
+        raw.ai?.name ?? "AI",
+        Number(raw.ai?.money ?? STARTING_AMT),
+        Number(raw.ai?.score ?? 0),
+    );
+    const history = Array.isArray(raw.history) ? raw.history.map((r: any) => new RoundRecord(
+        Number(r.round ?? 0),
+        Number(r.player_bid ?? 0),
+        Number(r.ai_bid ?? 0),
+        r.winner ?? null,
+        Number(r.maintenance_fee_of_round ?? 0),
+        Number(r.p_score ?? 0),
+        Number(r.p_money_before_m ?? 0),
+        Number(r.p_money_before_b ?? 0),
+        Number(r.p_money_after_b ?? 0),
+        Number(r.a_score ?? 0),
+        Number(r.a_money_before_m ?? 0),
+        Number(r.a_money_before_b ?? 0),
+        Number(r.a_money_after_b ?? 0),
+    )) : [];
+
+    return new GameState(
+        Number(raw.starting_money ?? STARTING_AMT),
+        Number(raw.current_round ?? 1),
+        Number(raw.maintenance_fee_current ?? 0),
+        player,
+        ai,
+        history,
+    );
+}
+
+// Lazy singleton pipeline so we don't rebuild the graph every round/request
+let cachedGraph: GraphLike | null = null;
+export function getGraph(): GraphLike {
+    if (!cachedGraph) {
+        cachedGraph = buildPipeline();
+    }
+    return cachedGraph;
+}
+
+export type RoundOutcome = {
+    status: "ok" | "ended";
+    message?: string;
+    round?: RoundRecord;
+    aiReasons?: string[];
+};
+
+export async function play_round(state: GameState, player_bid: number, graph: GraphLike = getGraph()): Promise<RoundOutcome> {
+    // Storing player's money at the start of the game (before maintenance costs)
+    const p_money_before_m = state.player.money;
+    const a_money_before_m = state.ai.money;
+
+    // Calculating maintenance fee
+    const m_fee = calculate_maintenance_fee(state.current_round);
+
+    // Store maintenance fee of current round in state
+    state.maintenance_fee_current = m_fee;
+
+    // Apply maintenance fees and check that everyone can pay
+    const ok = apply_maintenance_fee(state, state.player, state.ai);
+
+    // Storing player's money after paying maintenance fees and before bid
+    const p_money_before_b = state.player.money;
+    const a_money_before_b = state.ai.money;
+
+    if (!ok) {
+        if (p_money_before_m < m_fee && a_money_before_m < m_fee) {
+            console.log("Both players could not afford maintenance fees.");
+            console.log("Game Ended!");
+            return { status: "ended", message: "Both players could not afford maintenance fees." };
+        }
+        else if (p_money_before_m < m_fee) {
+            console.log("PLAYER could not afford maintenance fees.");
+            walkover("PLAYER", state);
+            return { status: "ended", message: "PLAYER could not afford maintenance fees." };
+        }
+        else {
+            console.log("AI could not afford maintenance fees.");
+            walkover("AI", state);
+            return { status: "ended", message: "AI could not afford maintenance fees." };
+        }
+    }
+
+    // Clamp player bid to available money
+    const p_bid = Math.max(0, Math.min(player_bid, p_money_before_b));
+
+    // Get bid from AI
+    const [a_bid, desc] = await chooseBid(graph as any, state as any, "AI");
+
+    // determine winner
+    const winner = round_winner(p_bid, a_bid);
+    apply_payment(state.player, state.ai, p_bid, a_bid);
+    award_point(state.player, state.ai, winner);
+
+    // Record round data
+    const rec = new RoundRecord(
+        state.current_round,
+        p_bid,
+        a_bid,
+        winner,
+        state.maintenance_fee_current,
+
+        state.player.score,
+        p_money_before_m,
+        p_money_before_b,
+        state.player.money,
+
+        state.ai.score,
+        a_money_before_m,
+        a_money_before_b,
+        state.ai.money,
+    );
+
+    // add round record to gamestate history
+    state.history.push(rec);
+
+    // immediate elimination due to bidding
+    if (state.player.money == 0 && state.ai.money == 0) {
+        console.log("\nBoth players hit $0. Game ends");
+        state.current_round += 1;
+        return { status: "ended", message: "Both players hit $0.", round: rec, aiReasons: desc };
+    }
+    else if (state.player.money == 0) {
+        console.log("\nPLAYER hit $0. Game ends");
+        walkover("PLAYER", state, true);
+        state.current_round += 1;
+        return { status: "ended", message: "PLAYER hit $0.", round: rec, aiReasons: desc };
+    }
+    else if (state.ai.money == 0) {
+        console.log("\nAI hit $0. Game ends");
+        walkover("AI", state, true);
+        state.current_round += 1;
+        return { status: "ended", message: "AI hit $0.", round: rec, aiReasons: desc };
+    }
+
+    state.current_round += 1;
+    return { status: "ok", round: rec, aiReasons: desc };
+}
+
+// Console-driven CLI removed; drive the game via frontend/API using play_round and report helpers.
 
 async function game_loop() {
 
@@ -497,173 +649,10 @@ async function game_loop() {
 
 
 
-// API Helper Functions for Next.js route
+(async () => {
 
-// Create initial game state
-export function create_initial_state(): GameState {
-    return new GameState(
-        STARTING_AMT,
-        1,
-        0,
-        new PlayerState("PLAYER", STARTING_AMT),
-        new PlayerState("AI", STARTING_AMT),
-        []
-    );
-}
-
-// Hydrate state from JSON (reconstruct class instances)
-export function hydrate_state(json: any): GameState {
-    const player = new PlayerState(
-        json.player?.name || "PLAYER",
-        json.player?.money ?? STARTING_AMT,
-        json.player?.score ?? 0
-    );
-    const ai = new PlayerState(
-        json.ai?.name || "AI",
-        json.ai?.money ?? STARTING_AMT,
-        json.ai?.score ?? 0
-    );
-    
-    const history: RoundRecord[] = (json.history || []).map((r: any) => new RoundRecord(
-        r.round,
-        r.player_bid,
-        r.ai_bid,
-        r.winner,
-        r.maintenance_fee_of_round,
-        r.p_score,
-        r.p_money_before_m,
-        r.p_money_before_b,
-        r.p_money_after_b,
-        r.a_score,
-        r.a_money_before_m,
-        r.a_money_before_b,
-        r.a_money_after_b
-    ));
-    
-    return new GameState(
-        json.starting_money ?? STARTING_AMT,
-        json.current_round ?? 1,
-        json.maintenance_fee_current ?? 0,
-        player,
-        ai,
-        history
-    );
-}
-
-// Play a single round (async for AI decision)
-export async function play_round(state: GameState, player_bid: number): Promise<{
-    winner: string | null;
-    player_bid: number;
-    ai_bid: number;
-    ai_reasons: string[];
-    round: number;
-    game_over: boolean;
-    game_over_reason?: string;
-}> {
-    const graph = buildPipeline();
-    
-    // Store money before maintenance
-    const p_money_before_m = state.player.money;
-    const a_money_before_m = state.ai.money;
-    
-    // Calculate and apply maintenance fee
-    const m_fee = calculate_maintenance_fee(state.current_round);
-    state.maintenance_fee_current = m_fee;
-    
-    const ok = apply_maintenance_fee(state, state.player, state.ai);
-    
-    const p_money_before_b = state.player.money;
-    const a_money_before_b = state.ai.money;
-    
-    // Check for maintenance bankruptcy
-    if (!ok) {
-        let game_over_reason = "";
-        if (p_money_before_m < m_fee && a_money_before_m < m_fee) {
-            game_over_reason = "Both players could not afford maintenance fees.";
-        } else if (p_money_before_m < m_fee) {
-            game_over_reason = "PLAYER could not afford maintenance fees.";
-            walkover("PLAYER", state);
-        } else {
-            game_over_reason = "AI could not afford maintenance fees.";
-            walkover("AI", state);
-        }
-        return {
-            winner: null,
-            player_bid: 0,
-            ai_bid: 0,
-            ai_reasons: [game_over_reason],
-            round: state.current_round,
-            game_over: true,
-            game_over_reason
-        };
-    }
-    
-    // Clamp player bid to available money
-    const p_bid = Math.min(Math.max(0, player_bid), state.player.money);
-    
-    // Get AI bid
-    const [a_bid, ai_reasons] = await chooseBid(graph as any, state as any, "AI");
-    
-    // Determine winner and apply
-    const winner = round_winner(p_bid, a_bid);
-    apply_payment(state.player, state.ai, p_bid, a_bid);
-    award_point(state.player, state.ai, winner);
-    
-    // Record round
-    const rec = new RoundRecord(
-        state.current_round,
-        p_bid,
-        a_bid,
-        winner,
-        state.maintenance_fee_current,
-        state.player.score,
-        p_money_before_m,
-        p_money_before_b,
-        state.player.money,
-        state.ai.score,
-        a_money_before_m,
-        a_money_before_b,
-        state.ai.money
-    );
-    state.history.push(rec);
-    
-    // Check for game over conditions
-    let game_over = false;
-    let game_over_reason: string | undefined;
-    
-    if (state.player.money === 0 && state.ai.money === 0) {
-        game_over = true;
-        game_over_reason = "Both players hit $0. Game ends.";
-    } else if (state.player.money === 0) {
-        game_over = true;
-        game_over_reason = "PLAYER hit $0. Game ends.";
-        walkover("PLAYER", state, true);
-    } else if (state.ai.money === 0) {
-        game_over = true;
-        game_over_reason = "AI hit $0. Game ends.";
-        walkover("AI", state, true);
-    }
-    
-    state.current_round += 1;
-    
-    return {
-        winner,
-        player_bid: p_bid,
-        ai_bid: a_bid,
-        ai_reasons,
-        round: state.current_round - 1,
-        game_over,
-        game_over_reason
-    };
-}
-
-// Export types and classes for route.ts
-export { GameState, PlayerState, RoundRecord };
-
-// CLI game loop (only run if this file is executed directly)
-// (async () => {
-//     const state = await game_loop();
-//     console.log("\n===============GAME ENDED===============");
-//     const report = await generateReport(build_report_context(state))
-//     console.log(report)
-// })();
+    const state = await game_loop();
+    console.log("\n===============GAME ENDED===============");
+    const report = await generateReport(build_report_context(state))
+    console.log(report)
+})();
