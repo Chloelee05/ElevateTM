@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elevate™ - Pay-to-Win Elevator Simulation</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ELEVATE™</h1>
+            <p class="subtitle">PAY-TO-WIN ELEVATOR SIMULATION</p>
+            <div class="system-status">
+                <div class="status-item">
+                    <span>DISRUPTION:</span>
+                    <span id="disruptionScore">0</span>
+                </div>
+                <div class="status-item">
+                    <span>STATUS:</span>
+                    <span id="systemStatus" class="status-normal">STABLE</span>
+                </div>
+                <div class="status-item">
+                    <span>INSTABILITY:</span>
+                    <span id="instabilityLevel">0%</span>
+                </div>
+            </div>
+        </header>
+
+        <div id="tutorialOverlay" class="tutorial-overlay">
+            <div class="tutorial-content">
+                <h2>HOW TO PLAY</h2>
+                <p>Welcome to Elevate™ - where money buys priority!</p>
+                <ul>
+                    <li><strong>GOAL:</strong> Be the first to reach Floor 1! You start on a random floor (2-5)</li>
+                    <li><strong>AUCTION SYSTEM:</strong> Bid credits to call elevators. Higher bids override lower bids!</li>
+                    <li><strong>PLAYERS:</strong> 2 players (you + 1 AI bot) on floors 2-5, all want to reach Floor 1</li>
+                    <li><strong>BIDDING:</strong> Enter your bid amount and click "Place Bid". Higher bids take priority!</li>
+                    <li><strong>PREMIUM ACTIONS:</strong> Use strategically to gain advantages. More actions = longer gameplay!</li>
+                    <li><strong>AI BOTS:</strong> Watch the announcement board to see bot bids and actions</li>
+                    <li><strong>ROUND SYSTEM:</strong> Each round you submit 1 bid and 1 action, then round processes</li>
+                    <li><strong>END GAME:</strong> First to reach Floor 1 wins, or after maximum rounds</li>
+                </ul>
+                <p class="goal-highlight">⚠️ Strategy: Balance bidding with premium actions to reach Floor 1 first!</p>
+                <button id="closeTutorial">CLOSE</button>
+            </div>
+        </div>
+
+        <div id="joinScreen" class="screen hidden">
+            <div class="join-form">
+                <h2>JOIN THE GAME</h2>
+                <input type="text" id="nicknameInput" placeholder="ENTER NICKNAME" maxlength="20">
+                <button id="joinButton">JOIN GAME</button>
+                <button id="showTutorialButton" style="margin-top: 15px; background: #4ecdc4; font-size: 0.7em;">HOW TO PLAY</button>
+            </div>
+        </div>
+
+        <div id="gameScreen" class="screen hidden">
+            <div class="game-layout">
+                <div class="left-panel">
+                    <div class="round-info">
+                        <h3>ROUND <span id="currentRound">1</span></h3>
+                        <p style="font-size: 0.7em; color: #ffd93d; margin-top: 10px;">
+                            Phase: <span id="roundPhase">WAITING</span>
+                        </p>
+                        <button id="startRoundButton" class="round-button" style="margin-top: 15px; width: 100%; padding: 12px; background: #ff6b6b; color: #fff; border: 3px solid #000; cursor: pointer; font-family: 'Press Start 2P', cursive; font-size: 0.7em; box-shadow: 3px 3px 0px #000;">
+                            START ROUND
+                        </button>
+                        <div id="roundStatus" style="margin-top: 10px; font-size: 0.6em;">
+                            <p>Bid: <span id="bidStatus">Not submitted</span></p>
+                            <br>
+                            <p>Action: <span id="actionStatus">Not submitted</span></p>
+                        </div>
+                    </div>
+
+                    <div class="user-info">
+                        <h3 id="userNickname">PLAYER</h3>
+                        <div class="credits">
+                            <span>CREDITS:</span>
+                            <span id="userCredits">$50</span>
+                        </div>
+                        <div class="user-location">
+                            <span>FLOOR:</span>
+                            <span id="userFloor">1</span>
+                        </div>
+                    </div>
+
+                    <div class="elevator-controls" id="bidPanel">
+                        <h4>YOUR BID</h4>
+                        <div class="bid-controls">
+                            <p style="font-size: 0.6em; margin-bottom: 10px; color: #ffd93d;">Goal: Reach Floor 1</p>
+                            <div class="elevator-buttons">
+                                <button class="elevator-button up-button" id="upButton" disabled>↑</button>
+                                <button class="elevator-button down-button" id="downButton">↓</button>
+                            </div>
+                            <div id="bidInputSection" class="hidden">
+                                <label>YOUR BID ($):</label>
+                                <br>
+                                <br>
+                                <div style="position: relative; display: flex; align-items: center;">
+                                    <input type="number" id="bidInput" min="1" value="1" step="1">
+                                    <div style="position: absolute; right: 5px; display: flex; flex-direction: column; gap: 2px;">
+                                        <button type="button" id="bidUpButton" style="width: 30px; height: 18px; background: #4ecdc4; border: 3px solid #000; cursor: pointer; box-shadow: 2px 2px 0px #000; font-size: 12px; line-height: 1; padding: 0; color: #000; font-weight: bold;">▲</button>
+                                        <button type="button" id="bidDownButton" style="width: 30px; height: 18px; background: #4ecdc4; border: 3px solid #000; cursor: pointer; box-shadow: 2px 2px 0px #000; font-size: 12px; line-height: 1; padding: 0; color: #000; font-weight: bold;">▼</button>
+                                    </div>
+                                </div>
+                                <button id="submitBidButton" style="margin-top: 10px;">SUBMIT BID</button>
+                            </div>
+                            <p style="font-size: 0.5em; margin-top: 10px; color: #9ca3af;">Select direction first!</p>
+                        </div>
+                    </div>
+
+                    <div class="actions-panel">
+                        <h4>SPECIAL ACTION</h4>
+                        <p style="font-size: 0.6em; color: #9ca3af; margin-bottom: 10px;">Choose one action per round (optional)</p>
+                        <div id="actionsContainer" class="actions-grid">
+                            <!-- Actions will be populated by JavaScript -->
+                        </div>
+                        <button id="skipActionButton" class="skip-action-button hidden" style="margin-top: 10px; padding: 8px; background: #4ecdc4; color: #000; border: 3px solid #000; cursor: pointer; font-family: 'Press Start 2P', cursive; font-size: 0.6em; box-shadow: 2px 2px 0px #000;">
+                            SKIP ACTION
+                        </button>
+                    </div>
+                </div>
+
+                <div class="building-container">
+                    <div id="building" class="building">
+                        <!-- Building will be populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="right-panel">
+                    <div class="announcement-board">
+                        <h4>📢 LIVE FEED</h4>
+                        <div id="announcementsList" class="announcements-list">
+                            <div class="announcement-item">Waiting for activity...</div>
+                        </div>
+                    </div>
+
+                    <div class="goal-panel">
+                        <h4>🎯 GAME RULES</h4>
+                        <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
+                            <strong>GOAL:</strong> Be the first to reach <span class="goal-highlight">Floor 1</span>!
+                        </p>
+                        <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
+                            <strong>ROUND SYSTEM:</strong> Each round you can submit 1 bid and 1 action
+                        </p>
+                        <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
+                            <strong>BIDDING:</strong> Higher bids win! Bid credits to call elevators to your floor
+                        </p>
+                        <p style="font-size: 0.6em; line-height: 1.8; margin-bottom: 10px;">
+                            <strong>ACTIONS:</strong> Use special actions strategically to gain advantages
+                        </p>
+                        <p style="font-size: 0.6em; line-height: 1.8;">
+                            <strong>FLOORS:</strong> 5 floors total (2-5 start, 1 is goal)
+                        </p>
+                    </div>
+
+                    <div class="players-list">
+                        <h4>PLAYERS</h4>
+                        <div id="playersList"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="collapseScreen" class="screen hidden">
+            <div class="collapse-message">
+                <h2>💥 SYSTEM COLLAPSE 💥</h2>
+                <p id="collapseReason">The elevator system has collapsed!</p>
+                <div class="collapse-stats">
+                    <p>FINAL DISRUPTION SCORE: <span id="finalDisruptionScore">0</span></p>
+                    <br>
+                    <br>
+                    <p>INSTABILITY LEVEL: <span id="finalInstability">0%</span></p>
+                </div>
+                <p style="margin-top: 20px; font-size: 0.7em;">The system collapsed because too many premium actions were used, disrupting the natural flow of elevators.</p>
+                <button id="restartButton">RESTART GAME</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+</body>
+</html>
