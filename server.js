@@ -1333,6 +1333,40 @@ async function checkWinConditions() {
     return true;
   }
   
+  // Check for bankruptcy (credits = 0)
+  const playerCredits = gameState.player?.credits || 0;
+  const botCredits = gameState.bot?.credits || 0;
+  
+  if (playerCredits === 0 && botCredits === 0) {
+    // Both bankrupt - decide by passengers
+    const winner = playerPassengers > botPassengers ? 
+      gameState.player.nickname : 
+      (botPassengers > playerPassengers ? gameState.bot.nickname : 'Tie');
+    const reason = playerPassengers > botPassengers ?
+      `💸 Both players bankrupt! You win with ${playerPassengers} vs ${botPassengers} passengers!` :
+      (botPassengers > playerPassengers ? 
+        `💸 Both players bankrupt! AI Bot wins with ${botPassengers} vs ${playerPassengers} passengers!` :
+        `💸 Both players bankrupt! It's a tie with ${playerPassengers} passengers each!`);
+    await emitGameEnd(winner, reason);
+    return true;
+  }
+  
+  if (playerCredits === 0) {
+    await emitGameEnd(
+      gameState.bot.nickname,
+      `💸 You went bankrupt ($0)! AI Bot wins by walkover!`
+    );
+    return true;
+  }
+  
+  if (botCredits === 0) {
+    await emitGameEnd(
+      gameState.player.nickname,
+      `💸 AI Bot went bankrupt ($0)! You win by walkover!`
+    );
+    return true;
+  }
+  
   // Check if max rounds reached
   if (gameState.currentRound >= gameState.maxRounds) {
     const winner = playerPassengers > botPassengers ? 
