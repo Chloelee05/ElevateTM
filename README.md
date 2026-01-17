@@ -1,127 +1,36 @@
-# Elevate™ - Pay-to-Win Elevator Simulation
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-A round-based web-based game where you compete against an AI bot in a pay-to-win elevator system. Use your limited credits strategically to reach Floor 1 first!
+## Getting Started
 
-## 🎮 Game Overview
+First, run the development server:
 
-- **Goal**: Be the first to reach Floor 1!
-- **Starting Credits**: $50 (no refills)
-- **Players**: You + 1 AI bot
-- **Floors**: 5 floors total (1-5, Floor 1 is the goal)
-- **Starting Floors**: Random floors 2-5
-- **Game System**: Round-based (submit 1 bid + 1 action per round)
-- **Game End**: Reach Floor 1, or after maximum rounds (10 rounds)
-
-## 🚀 Quick Start
-
-1. **Install dependencies:**
 ```bash
-npm install
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-2. **Start the server:**
-```bash
-npm start
-```
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-3. **Open your browser:**
-```
-http://localhost:3000
-```
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-## 🎯 How to Play
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-1. Enter your nickname and join the game
-2. You'll start on a random floor (2-5), AI bot on a different floor
-3. **Round System**: Each round you can submit 1 bid and 1 action
-4. **Start Round**: Click "START ROUND" to begin
-5. **Submit Bid**: Select direction (↑/↓) and place a bid
-   - **Bid Limit System**: Progressive unlocking (start: $5, then $10, $15, etc.)
-6. **Submit Action**: Choose one special action per round
-7. **Round Processing**: Both players' bids and actions are processed
-8. **Win**: First to reach Floor 1 wins, or closest to Floor 1 after 10 rounds!
+## Learn More
 
-## ⚡ Special Actions (Choose 1 per round)
+To learn more about Next.js, take a look at the following resources:
 
-- **Golden Summon** ($3) - Summon elevator to your floor
-- **Bribe the AI** ($2) - Increase bid priority
-- **Capitalist Blitz** ($3) - All actions 50% off for 60s
-- **Emergency Call** ($2) - Force nearest elevator to your floor
-- **Priority Boost** ($1) - Double your bid effectiveness
-- **Force Close Door** ($1) - Cancel all other bids
-- **Royal Ascent** ($2) - Non-stop express ride
-- **Floor 1 Priority** ($2) - Guaranteed stop at Floor 1
-- **Skip Floors** ($3) - Skip all floors, go directly to Floor 1
-- **Disable Action** ($2) - Disable target player actions for 6s
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-**Note**: Each round you can submit 1 bid and 1 action. Both are processed together when you submit both.
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## 🤖 AI Bot Integration
+## Deploy on Vercel
 
-The AI bot decision-making is designed to integrate with Moe/Jason's AI agent API.
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-**Flow**: 
-1. YJ (Game Logic) prepares JSON data via `prepareDataForAIAgent()`
-2. Calls Moe/Jason's AI agent API (currently commented out, using simple bot logic)
-3. AI agent returns JSON decision: `{ bid: number | null, action: string | null }`
-4. Game processes bot's decision along with player's decision
-
-**API Integration**: 
-- Server endpoint: `/api/game-state` - Returns current game state for AI agent
-- AI Agent URL: Set via `AI_AGENT_API_URL` environment variable (default: `http://localhost:3001/api/ai-agent`)
-- Currently using simple bot logic until AI agent is ready
-
-## 🎨 Features
-
-- **8bit Pixel Art Style** - Retro gaming aesthetic
-- **Round-Based System** - Strategic turn-based gameplay (1 bid + 1 action per round)
-- **Single AI Bot** - Compete against 1 AI bot
-- **5 Floors** - Simplified building with 5 floors
-- **Live Announcement Board** - See all player actions in real-time
-- **Bid Limit System** - Progressive unlocking as max bid increases
-- **AI Agent Ready** - Designed for integration with Moe/Jason's AI agent API
-
-## 🛠️ Tech Stack
-
-- **Backend**: Node.js, Express, Socket.io
-- **Frontend**: HTML, CSS (8bit style), JavaScript
-- **Storage**: In-memory game state
-- **AI**: Rule-based bot system
-
-## 📁 Project Structure
-
-```
-elevatetm/
-├── server.js          # Game server & logic
-├── public/
-│   ├── index.html     # Main game UI
-│   ├── client.js      # Client-side logic
-│   └── style.css      # 8bit pixel art styling
-├── package.json       # Dependencies
-└── README.md          # This file
-```
-
-## 🎮 Game Mechanics
-
-- **Round System**: Each round allows 1 bid and 1 action submission
-- **Bid System**: Auction-based elevator calling with progressive limits ($5 → $10 → $15...)
-- **Action System**: Choose 1 action per round from available actions
-- **Round Processing**: Both players' decisions are processed together
-- **Elevator Movement**: Step-by-step movement with boarding animations
-- **Floor 1 Rule**: First to reach Floor 1 wins
-- **Max Rounds**: Game ends after 10 rounds if no winner (closest to Floor 1 wins)
-
-## 🔧 AI Agent Integration
-
-The game is designed to work with an external AI agent API (Moe/Jason's AI agent).
-
-**To enable AI agent**:
-1. Set `AI_AGENT_API_URL` environment variable to your AI agent endpoint
-2. Uncomment the fetch code in `server.js` `callAIAgent()` function (around line 149)
-3. Ensure AI agent returns: `{ bid: number | null, action: string | null }`
-
-**Current status**: Using simple bot logic until AI agent is ready
-
-## 📝 License
-
-MIT
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
