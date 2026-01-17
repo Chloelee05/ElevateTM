@@ -193,13 +193,26 @@ function makeSimpleBotDecision() {
     return { bid: null, action: null };
   }
   
-  // Simple strategy: bid 1-5 credits randomly, use action 30% of the time
+  // Random strategy: bid 1-10 credits randomly, use action 70% of the time
   const canBid = bot.credits > 0;
-  const canUseAction = Math.random() < 0.3 && bot.credits >= Math.min(...Object.values(ACTION_COSTS));
+  const minActionCost = Math.min(...Object.values(ACTION_COSTS));
+  const canUseAction = bot.credits >= minActionCost;
   
-  const bid = canBid ? Math.min(bot.credits, Math.floor(Math.random() * 5) + 1) : null;
-  const action = canUseAction ? 
-    Object.keys(ACTION_COSTS).find(action => ACTION_COSTS[action] <= bot.credits) : null;
+  // Bid: 1-10 credits randomly (but not more than bot has)
+  const bidAmount = Math.min(bot.credits, Math.floor(Math.random() * 10) + 1);
+  const bid = canBid ? bidAmount : null;
+  
+  // Action: 70% chance to use action if can afford
+  let action = null;
+  if (canUseAction && Math.random() < 0.7) {
+    // Randomly select from available actions that bot can afford
+    const affordableActions = Object.keys(ACTION_COSTS).filter(
+      actionType => ACTION_COSTS[actionType] <= bot.credits
+    );
+    if (affordableActions.length > 0) {
+      action = affordableActions[Math.floor(Math.random() * affordableActions.length)];
+    }
+  }
   
   return { bid, action };
 }
@@ -756,38 +769,18 @@ io.on('connection', (socket) => {
     
     gameState.playerBid = { bid, floor, direction };
     
-    // Move to actions phase if bid is submitted
-    if (!gameState.playerAction) {
-      gameState.roundPhase = 'actions';
-    } else {
-      // Both submitted, process round immediately
-      gameState.roundPhase = 'processing';
+    // Move to actions phase when bid is submitted (don't auto-start round)
+    // Player can now select action and then click "START ROUND" button
+    gameState.roundPhase = 'actions';
+    
+    // Clear any existing auto-process timeout (no longer needed)
+    if (gameState.autoProcessTimeout) {
+      clearTimeout(gameState.autoProcessTimeout);
+      gameState.autoProcessTimeout = null;
     }
     
     socket.emit('bidSubmitted', { bid: bid });
     io.emit('gameState', getPublicGameState());
-    
-    // If bid is submitted (action can be null to skip), process round immediately
-    if (gameState.playerBid) {
-      gameState.roundPhase = 'processing';
-      processRound();
-    }
-    // If only bid is submitted, set a timeout to auto-process after 10 seconds
-    else if (gameState.playerBid && !gameState.playerAction) {
-      // Clear any existing timeout
-      if (gameState.autoProcessTimeout) {
-        clearTimeout(gameState.autoProcessTimeout);
-      }
-      // Set new timeout to auto-process if no action is submitted
-      gameState.autoProcessTimeout = setTimeout(() => {
-        if (gameState.playerBid && !gameState.playerAction && gameState.roundPhase === 'actions') {
-          console.log('Auto-processing round (no action submitted)...');
-          gameState.roundPhase = 'processing';
-          io.emit('gameState', getPublicGameState());
-          processRound();
-        }
-      }, 10000); // 10 seconds
-    }
   });
   
   // Player submits action for current round
@@ -802,15 +795,16 @@ io.on('connection', (socket) => {
       return;
     }
     
+    // Check if action already submitted (allow resubmission if changing action during bidding/actions phase)
+    if (gameState.playerAction !== null && gameState.playerAction !== undefined && gameState.roundPhase === 'processing') {
+      socket.emit('error', { message: 'Action already submitted for this round' });
+      return;
+    }
+    
     const { actionType } = data;
     
-    // If actionType is null, player is skipping action (allow it even if already null)
+    // If actionType is null, player is skipping action
     if (actionType === null) {
-      // Allow skipping action even if already null (no-op)
-      if (gameState.playerAction !== null && gameState.playerAction !== undefined) {
-        socket.emit('error', { message: 'Action already submitted for this round' });
-        return;
-      }
       gameState.playerAction = null; // Explicitly set to null to skip action
     } else {
       if (!actionType) {
@@ -832,54 +826,79 @@ io.on('connection', (socket) => {
       gameState.playerAction = actionType;
     }
     
-    // Clear auto-process timeout since action was submitted
+    // Clear any existing auto-process timeout (no longer needed)
     if (gameState.autoProcessTimeout) {
       clearTimeout(gameState.autoProcessTimeout);
       gameState.autoProcessTimeout = null;
     }
     
-    // Move to processing if bid is also submitted, otherwise stay in current phase
-    if (gameState.playerBid) {
-      gameState.roundPhase = 'processing';
-    } else {
+    // Stay in actions phase (don't auto-start round)
+    // Player needs to click "START ROUND" button to confirm and start round
+    if (!gameState.playerBid) {
       gameState.roundPhase = 'actions';
     }
+    // If bid is already submitted, stay in actions phase (waiting for START ROUND button)
     
-    socket.emit('actionSubmitted', { actionType: actionType });
+    socket.emit('actionSubmitted', { 
+      actionType: actionType,
+      gameState: getPublicGameState() // Send full game state for immediate update
+    });
     io.emit('gameState', getPublicGameState());
-    
-    // If bid is submitted (action can be null to skip), process round immediately
-    if (gameState.playerBid) {
-      gameState.roundPhase = 'processing';
-      processRound();
-    }
   });
   
-  // Start new round (when player is ready)
+  // Start new round or confirm round submission
   socket.on('startRound', () => {
     if (!gameState.player || gameState.player.id !== socket.id) {
       socket.emit('error', { message: 'Not in game' });
       return;
     }
     
-    if (gameState.roundPhase !== 'waiting') {
-      socket.emit('error', { message: 'Round already in progress' });
+    // If in waiting phase, start the bidding phase
+    if (gameState.roundPhase === 'waiting') {
+      // Reset round data
+      gameState.playerBid = null;
+      gameState.playerAction = null;
+      gameState.botBid = null;
+      gameState.botAction = null;
+      
+      // Start bidding phase
+      gameState.roundPhase = 'bidding';
+      
+      io.emit('roundStart', {
+        round: gameState.currentRound,
+        gameState: getPublicGameState()
+      });
       return;
     }
     
-    // Reset round data
-    gameState.playerBid = null;
-    gameState.playerAction = null;
-    gameState.botBid = null;
-    gameState.botAction = null;
+    // If in bidding or actions phase, check if ready to process
+    if (gameState.roundPhase === 'bidding' || gameState.roundPhase === 'actions') {
+      // Check if bid is submitted (required)
+      if (!gameState.playerBid) {
+        socket.emit('error', { message: 'Please submit a bid first' });
+        return;
+      }
+      
+      // Action can be null (skipped), but both bid and action decision should be made
+      // If action is not set yet, set it to null (skip action)
+      if (gameState.playerAction === undefined) {
+        gameState.playerAction = null;
+      }
+      
+      // Both bid and action (or skip) are confirmed, start processing
+      gameState.roundPhase = 'processing';
+      io.emit('gameState', getPublicGameState());
+      processRound();
+      return;
+    }
     
-    // Start bidding phase
-    gameState.roundPhase = 'bidding';
+    // If already processing or other phase
+    if (gameState.roundPhase === 'processing') {
+      socket.emit('error', { message: 'Round is already processing' });
+      return;
+    }
     
-    io.emit('roundStart', {
-      round: gameState.currentRound,
-      gameState: getPublicGameState()
-    });
+    socket.emit('error', { message: 'Cannot start round at this time' });
   });
   
   socket.on('disconnect', () => {

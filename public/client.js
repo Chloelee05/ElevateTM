@@ -162,13 +162,36 @@ function selectDirection(direction) {
 }
 
 function startRound() {
-    if (!gameState || gameState.roundPhase !== 'waiting') {
+    if (!gameState) {
+        showNotification('Game state not available', 'error');
+        return;
+    }
+    
+    const roundPhase = gameState.roundPhase || 'waiting';
+    
+    // Allow startRound in waiting, bidding, or actions phase
+    // Server will handle the logic based on the phase
+    if (roundPhase !== 'waiting' && roundPhase !== 'bidding' && roundPhase !== 'actions') {
         showNotification('Cannot start round at this time', 'error');
         return;
     }
     
-    socket.emit('startRound');
-    showNotification('Round started! Submit your bid and action.');
+    // If in waiting phase, start the bidding phase
+    if (roundPhase === 'waiting') {
+        socket.emit('startRound');
+        showNotification('Round started! Submit your bid and action.');
+    } 
+    // If in bidding or actions phase, confirm and start the round processing
+    else if (roundPhase === 'bidding' || roundPhase === 'actions') {
+        // Check if bid is submitted
+        if (!gameState.playerBid) {
+            showNotification('Please submit a bid first', 'error');
+            return;
+        }
+        
+        socket.emit('startRound');
+        showNotification('Confirming round...');
+    }
 }
 
 function submitBid() {
@@ -243,7 +266,7 @@ function submitAction(actionType) {
     if (!currentUser) return;
     
     // Check if action already submitted for this round
-    if (gameState.playerAction) {
+    if (gameState.playerAction !== null && gameState.playerAction !== undefined) {
         showNotification('Action already submitted for this round', 'error');
         return;
     }
@@ -264,9 +287,15 @@ function submitAction(actionType) {
         return;
     }
     
-    socket.emit('submitAction', { actionType });
+    // Update local gameState immediately for better UX
+    gameState.playerAction = actionType;
     selectedAction = actionType;
+    
+    socket.emit('submitAction', { actionType });
     showNotification(`Action ${action.name} submitted!`);
+    
+    // Update UI immediately
+    updateUI();
 }
 
 function useAction(actionType) {
@@ -295,7 +324,12 @@ function updateUI() {
     
     // Update round status
     const bidStatus = gameState.playerBid ? `$${gameState.playerBid.bid}` : 'Not submitted';
-    const actionStatus = gameState.playerAction ? getActionDisplayName(gameState.playerAction) : 'Not submitted';
+    let actionStatus = 'Not submitted';
+    if (gameState.playerAction !== null && gameState.playerAction !== undefined) {
+        actionStatus = getActionDisplayName(gameState.playerAction);
+    } else if (gameState.playerAction === null) {
+        actionStatus = 'Skipped';
+    }
     const bidStatusEl = document.getElementById('bidStatus');
     const actionStatusEl = document.getElementById('actionStatus');
     if (bidStatusEl) bidStatusEl.textContent = bidStatus;
@@ -304,12 +338,33 @@ function updateUI() {
     // Update start round button
     const startRoundButton = document.getElementById('startRoundButton');
     if (startRoundButton) {
-        startRoundButton.disabled = roundPhase !== 'waiting';
+        const isBidSubmitted = !!gameState.playerBid;
+        const isActionSubmitted = gameState.playerAction !== null && gameState.playerAction !== undefined;
+        
         if (roundPhase === 'waiting') {
+            // Waiting for round to start - can start bidding
+            startRoundButton.disabled = false;
             startRoundButton.textContent = 'START ROUND';
         } else if (roundPhase === 'processing') {
+            // Round is processing
+            startRoundButton.disabled = true;
             startRoundButton.textContent = 'PROCESSING...';
+        } else if (roundPhase === 'bidding' || roundPhase === 'actions') {
+            // In bidding or actions phase - enable if bid is submitted
+            if (isBidSubmitted) {
+                startRoundButton.disabled = false;
+                // Show action status in button text
+                if (isActionSubmitted || gameState.playerAction === null) {
+                    startRoundButton.textContent = 'CONFIRM & START';
+                } else {
+                    startRoundButton.textContent = 'START (SKIP ACTION)';
+                }
+            } else {
+                startRoundButton.disabled = true;
+                startRoundButton.textContent = 'SUBMIT BID FIRST';
+            }
         } else {
+            startRoundButton.disabled = true;
             startRoundButton.textContent = 'ROUND IN PROGRESS';
         }
     }
@@ -377,10 +432,10 @@ function updateActionsPanel() {
     const roundPhase = gameState.roundPhase || 'waiting';
     // Can submit action during actions phase, waiting phase (before round starts), or bidding phase (can submit anytime before processing)
     const canSubmitAction = roundPhase === 'actions' || roundPhase === 'waiting' || roundPhase === 'bidding';
-    const isActionSubmitted = !!gameState.playerAction;
+    const isActionSubmitted = gameState.playerAction !== null && gameState.playerAction !== undefined;
     const isBidSubmitted = !!gameState.playerBid;
     
-    // If both submitted, disable all buttons
+    // If both submitted, disable all buttons (but player can still click CONFIRM & START)
     const roundProcessing = roundPhase === 'processing';
     
     ALL_ACTIONS.forEach(action => {
@@ -414,11 +469,12 @@ function updateActionsPanel() {
         actionsContainer.appendChild(button);
     });
     
-    // Show/hide skip action button
+    // Show/hide skip action button (optional - can skip action before confirming)
     const skipActionButton = document.getElementById('skipActionButton');
     if (skipActionButton) {
-        // Show skip button if bid is submitted but action is not, and round is in actions phase
-        if (isBidSubmitted && !isActionSubmitted && roundPhase === 'actions') {
+        // Show skip button if bid is submitted but action is not, and round is in actions or bidding phase
+        // This allows player to explicitly skip action before clicking "CONFIRM & START"
+        if (isBidSubmitted && !isActionSubmitted && (roundPhase === 'actions' || roundPhase === 'bidding')) {
             skipActionButton.classList.remove('hidden');
         } else {
             skipActionButton.classList.add('hidden');
@@ -669,7 +725,30 @@ socket.on('bidSubmitted', (data) => {
 });
 
 socket.on('actionSubmitted', (data) => {
-    showNotification(`Action ${getActionDisplayName(data.actionType)} submitted!`);
+    // Update gameState with the action that was submitted
+    if (data.gameState) {
+        gameState = data.gameState;
+        // Update currentUser if player data exists
+        if (currentUser && gameState.player) {
+            currentUser.credits = gameState.player.credits;
+            currentUser.floor = gameState.player.floor;
+            currentUser.inElevator = gameState.player.inElevator;
+            currentUser.elevatorId = gameState.player.elevatorId;
+        }
+    } else {
+        // Fallback: update local gameState if server didn't send full state
+        if (data.actionType !== null && data.actionType !== undefined) {
+            gameState.playerAction = data.actionType;
+        } else {
+            gameState.playerAction = null;
+        }
+    }
+    
+    if (data.actionType !== null && data.actionType !== undefined) {
+        showNotification(`Action ${getActionDisplayName(data.actionType)} submitted!`);
+    } else {
+        showNotification('Action skipped!');
+    }
     updateUI();
 });
 
@@ -701,9 +780,16 @@ socket.on('roundStart', (data) => {
         downButton.disabled = false;
         downButton.classList.remove('selected');
     }
+    // Reset bid input section - show it again for new round
     const bidInputSection = document.getElementById('bidInputSection');
     if (bidInputSection) {
-        bidInputSection.classList.add('hidden');
+        bidInputSection.classList.add('hidden'); // Will be shown when direction is selected
+    }
+    // Reset bid panel to enable it
+    const bidPanel = document.getElementById('bidPanel');
+    if (bidPanel) {
+        bidPanel.style.opacity = '1';
+        bidPanel.style.pointerEvents = 'auto';
     }
     updateUI();
 });
