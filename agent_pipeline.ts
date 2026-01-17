@@ -199,3 +199,123 @@ export function buildPipeline(model = "gpt-4o-mini") {
 
   return g.compile();
 }
+
+// Adaptor : GameState -> AgentState
+
+export type RoundWinner = "PLAYER" | "AI" | "TIE" | null;
+
+export type RoundSummary = {
+    round: number;
+    player_bid: number;
+    ai_bid: number;
+    winner: RoundWinner;
+    maintenance_fee: number;
+    p_money_after: number;
+    a_money_after: number;
+};
+
+export type Participant = {
+    money: number;
+    score: number;
+};
+
+export type GameState = {
+    player: Participant;
+    ai: Participant;
+    current_round: number;
+    maintenance_fee: number;
+    history: RoundSummary[];
+}
+
+export interface GraphLike {
+  invoke(state: AgentState): Promise<AgentState> | AgentState;
+}
+
+export async function chooseBid(
+  graph: GraphLike,
+  state: GameState,
+  me: Side,
+  personality: Personality = "neutral",
+  lookback = 6,
+  maintenanceInterval = MAINTENANCE_ROUND_INTERVAL,
+  maintenanceIncrement = MAINTENANCE_COST_INCREMENT
+): Promise<[number, string[]]> {
+  const my = me === "PLAYER" ? state.player : state.ai;
+  const opp = me === "PLAYER" ? state.ai : state.player;
+
+  const history = state.history.slice(-lookback).map((r) => ({
+    round: r.round,
+    player_bid: r.player_bid,
+    ai_bid: r.ai_bid,
+    winner: r.winner,
+    fee: r.maintenance_fee,
+    p_after: r.p_money_after,
+    a_after: r.a_money_after,
+  }));
+
+    const r = Number(state.current_round);
+    const outlook = {
+    next_round: maintenanceFeeForRound(r + 1, maintenanceInterval, maintenanceIncrement),
+    in_2_rounds: maintenanceFeeForRound(r + 2, maintenanceInterval, maintenanceIncrement),
+    in_3_rounds: maintenanceFeeForRound(r + 3, maintenanceInterval, maintenanceIncrement),
+  };
+
+    const agentState: AgentState = {
+      me,
+      round: r,
+      maintenance_fee: Number(state.maintenance_fee),
+      maintenance_outlook: outlook,
+      my_money: Number(my.money),
+      opp_money: Number(opp.money),
+      my_score: Number(my.score),
+      opp_score: Number(opp.score),
+      last_rounds: history,
+      personality,
+      reasons: [],
+    };
+  
+    const result = await graph.invoke(agentState);
+    return [Number(result.final_bid ?? 0), result.reasons ?? []];
+  }
+  
+  // Reporter Agent (unchanged)
+  export async function generateReport(context: Record<string, any>, model = "gpt-4o-mini") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY is not set; check your environment or .env file.");
+    }
+  
+    const llm = new ChatOpenAI({ model, apiKey, temperature: 0.2 });
+  
+    const prompt = `
+  You are a concise game analyst. Review the structured game summary and produce a formatted capital profile block (text-only).
+  Use finance analogies (maintenance = inflation/carry; bids = position sizing; cash = liquidity; score = returns).
+  Use ASCII only.
+  
+  Include exactly these sections/labels:
+  
+  Your Capital Profile
+  Risk Posture: <descriptor> (what this captures)
+  Capital Efficiency: <descriptor> ($X / point) (how cost per point reflects efficiency)
+  Emotional Discipline: <descriptor> (tilt/impulse control)
+  Liquidity Management: <descriptor> (cash preservation vs depletion)
+  Adaptability: <descriptor> (response to opponent shifts)
+  
+  Overall Archetype:
+  <archetype name>
+  
+  Key Takeaway:
+  <one or two sentences>
+  
+  Player Suggestions:
+  - <bullet 1>
+  - <bullet 2>
+  - <bullet 3>
+  
+  Game context:
+  ${JSON.stringify(context)}
+  `.trim();
+  
+    const resp = await llm.invoke(prompt);
+    return typeof resp.content === "string" ? resp.content : JSON.stringify(resp.content);
+  }
