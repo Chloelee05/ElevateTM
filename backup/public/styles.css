@@ -160,23 +160,23 @@ body {
 
 .panel-ai-bid,
 .panel-player-bid {
-  border-color: rgba(244, 114, 182, 0.6);
-  box-shadow: 0 0 18px rgba(244, 114, 182, 0.35);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
 }
 
 .panel-ai {
-  border-color: rgba(248, 113, 113, 0.7);
-  box-shadow: 0 0 18px rgba(248, 113, 113, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
 }
 
 .panel-player {
-  border-color: rgba(96, 165, 250, 0.7);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
 }
 
 .panel-bid {
-  border-color: rgba(96, 165, 250, 0.7);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
   height: 190px;
 }
 
@@ -187,8 +187,8 @@ body {
 
 .panel-reasoning,
 .panel-report {
-  border-color: rgba(248, 113, 113, 0.7);
-  box-shadow: 0 0 18px rgba(248, 113, 113, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
 }
 
 .panel-reasoning {
@@ -197,36 +197,16 @@ body {
 }
 
 .panel-ai-extra {
-  border-color: rgba(248, 113, 113, 0.7);
-  box-shadow: 0 0 18px rgba(248, 113, 113, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
   min-height: 140px;
 }
 
-.left-bottom-box {
-  border-color: rgba(248, 113, 113, 0.7);
-  box-shadow: 0 0 18px rgba(248, 113, 113, 0.4);
-}
-
-.right-bottom-box {
-  border-color: rgba(96, 165, 250, 0.7);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.4);
-}
-
 .panel-side-extra {
-  border-color: rgba(96, 165, 250, 0.7);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.4);
+  border-color: rgba(69, 224, 214, 0.6);
+  box-shadow: 0 0 18px rgba(69, 224, 214, 0.35);
   flex: 1;
   min-height: 0;
-}
-
-.panel-player-bid {
-  border-color: rgba(96, 165, 250, 0.7);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.4);
-}
-
-.panel-ai-bid {
-  border-color: rgba(248, 113, 113, 0.7);
-  box-shadow: 0 0 18px rgba(248, 113, 113, 0.4);
 }
 
 .bottom-box {
