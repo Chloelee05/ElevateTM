@@ -1,3 +1,5 @@
+`final code is in SUBMISSION folder`
+
 # Elevate™ - Strategic Passenger Collection Game
 
 A round-based web game where you compete against an AI bot powered by GPT-4o-mini. Use your credits strategically to win elevator bids and collect passengers!
